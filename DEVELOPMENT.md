@@ -99,16 +99,14 @@ To run the unit tests, simply use hatch:
 hatch run test
 ```
 
-##### Integration Tests
+##### Integration Tests (Currently WIP)
 
-Follow the steps below to perform integration testing:
-1. Launch Cinema 4D
-2. Go to Extensions tab > User Scripts > Run Script ...
-3. Select script file "./job_bundle_output_tests/{test}/scene/cube.py" within the GitHub repo.
-    The script builds the scene and saves it to "./job_bundle_output_tests/{test}/scene/{test}.c4d"
-4. Select Extensions tab > Deadline Cloud Submitter
-5. Submit or Export Bundle and confirm that the scene is rendered successfully. (The output should have a cube floating)
-6. Repeat the steps for all the test scenes in the folder.
+We run the integration tests by running it in Cinema 4D's python i.e. c4dpy. You would have to setup Cinema 4D licensing before you run the tests.
+
+1. Set the environment variable `C4D_PYTHON` to the location of the Cinema 4D python.
+   1. `set C4D_PYTHON=<c4dpy location>` on Windows Command or `$env:C4D_PYTHON = <c4dpy location>` on Windows Powershell.
+      1. The default location for `c4dpy` on Windows is `C:\Program Files\Maxon Cinema 4D 2025\c4dpy`
+3. Run `hatch run integ:test`
 
 ### Adaptor Development Workflow
 
