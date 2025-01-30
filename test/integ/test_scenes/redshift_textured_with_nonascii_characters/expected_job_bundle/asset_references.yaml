@@ -1,0 +1,12 @@
+assetReferences:
+  inputs:
+    directories: []
+    filenames:
+    - "D:\\Users\\pattatk\\GithubRepos\\deadline-cloud-for-cinema-4d\\test\\integ\\\
+      test_scenes\\redshift_textured_with_nonascii_characters\\generated_bundle\\\
+      redshift_textured-_\u20BF_\u0119_\xF1_\u03B2_\u0411_\u062A.c4d"
+  outputs:
+    directories:
+    - D:\Users\pattatk\GithubRepos\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_textured_with_nonascii_characters
+    - D:\Users\pattatk\GithubRepos\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_textured_with_nonascii_characters\generated_bundle\renders
+  referencedPaths: []

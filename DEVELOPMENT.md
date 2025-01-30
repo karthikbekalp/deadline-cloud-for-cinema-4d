@@ -110,6 +110,13 @@ Follow the steps below to perform integration testing:
 5. Submit or Export Bundle and confirm that the scene is rendered successfully. (The output should have a cube floating)
 6. Repeat the steps for all the test scenes in the folder.
 
+###### WIP Running integration tests.
+
+1. Set the environment variable `C4D_EXECUTABLE` to the location of the Blender application.
+   1. `set C4D_EXECUTABLE=<C4DLocation>` on Windows.
+      1. Default on Windows is `C:\Program Files\Maxon Cinema 4D 2025\Commandline.exe`
+2. Run `hatch run integ:test`
+
 ### Adaptor Development Workflow
 
 The Cinema 4D adaptor is a command-line application (named `cinema4d-openjd`) that interfaces with the Cinema 4D application.

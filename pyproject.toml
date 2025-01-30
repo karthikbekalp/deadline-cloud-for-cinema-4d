@@ -127,6 +127,10 @@ looponfailroots = [
 filterwarnings = [
     "ignore::DeprecationWarning"
 ]
+markers = [
+    "submitter: mark a test as using the submitter.",
+    "adaptor: mark test as using the adaptor.",
+]
 
 [tool.coverage.run]
 source_pkgs = [ "deadline/cinema4d_adaptor", "deadline/cinema4d_submitter" ]

@@ -295,22 +295,50 @@ def _prompt_save_current_document():
     c4d.EventAdd()
     return True
 
-
-def _show_submitter(parent=None, f=Qt.WindowFlags()):
-
+def initialize_render_settings() -> RenderSubmitterUISettings:
     render_settings = RenderSubmitterUISettings()
-
-    # Set the setting defaults that come from the scene
     render_settings.name = Path(Scene.name()).name
     render_settings.frame_list = Animation.frame_list()
     default_path, multi_path = Scene.get_output_paths()
     render_settings.output_path = default_path
     render_settings.multi_pass_path = multi_path
-
-    # Load the sticky settings
     render_settings.load_sticky_settings(Scene.name())
+    return render_settings
 
-    doc = c4d.documents.GetActiveDocument()
+def save_job_bundle_files(
+    job_bundle_path: Path,
+    job_template: dict,
+    parameter_values: dict,
+    asset_references: AssetReferences
+) -> None:
+    with open(job_bundle_path / "template.yaml", "w", encoding="utf8") as f:
+        deadline_yaml_dump(job_template, f, indent=1)
+
+    with open(job_bundle_path / "parameter_values.yaml", "w", encoding="utf8") as f:
+        deadline_yaml_dump({"parameterValues": parameter_values}, f, indent=1)
+
+    with open(job_bundle_path / "asset_references.yaml", "w", encoding="utf8") as f:
+        deadline_yaml_dump(asset_references.to_dict(), f, indent=1)
+
+def setup_auto_detected_attachments(take_data_list: list[TakeData]) -> AssetReferences:
+    """
+    Set up automatically detected attachments from the scene and takes.
+    """
+    auto_detected_attachments = AssetReferences()
+    introspector = AssetIntrospector()
+    
+    # Get scene assets
+    auto_detected_attachments.input_filenames = set(
+        os.path.normpath(path) for path in introspector.parse_scene_assets()
+    )
+    
+    # Add output directories from takes
+    for take_data in take_data_list:
+        auto_detected_attachments.output_directories.update(take_data.output_directories)
+        
+    return auto_detected_attachments
+
+def process_takes(doc: Any):
     take_data = doc.GetTakeData()
     main_take = take_data.GetMainTake()
     current_take = take_data.GetCurrentTake()
@@ -338,7 +366,7 @@ def _show_submitter(parent=None, f=Qt.WindowFlags()):
             renderer_name=renderer_name,
             ui_group_label=f"Take {take_name} Settings ({renderer_name} renderer)",
             frames_parameter_name=None,
-            frame_range=Animation.frame_list(take_render_data),
+            frame_range=str(Animation.frame_list(take_render_data)),
             output_directories=output_directories,
             marked=take.IsChecked(),
         )
@@ -347,7 +375,107 @@ def _show_submitter(parent=None, f=Qt.WindowFlags()):
             current_data_list = [take_data]
         if take.IsChecked():
             marked_data_list.append(take_data)
-    main_data_list = [take_data_list[0]]
+        
+        return take_data_list, current_data_list, marked_data_list, [take_data_list[0]]
+
+def process_job_bundle(settings, take_data_list, current_data_list, marked_data_list, main_data_list, job_bundle_dir, asset_references, queue_parameters, host_requirements, attachments):
+    submit_takes = main_data_list
+    job_bundle_path = Path(job_bundle_dir)
+    if settings.take_selection == TakeSelection.MAIN:
+        submit_takes = main_data_list
+    if settings.take_selection == TakeSelection.ALL:
+        submit_takes = take_data_list
+    if settings.take_selection == TakeSelection.MARKED:
+        submit_takes = marked_data_list
+    if settings.take_selection == TakeSelection.CURRENT:
+        submit_takes = current_data_list
+
+    # Add overrides to asset references
+    if settings.output_path:
+        asset_references.output_directories.add(os.path.dirname(settings.output_path))
+    if settings.multi_pass_path:
+        asset_references.output_directories.add(os.path.dirname(settings.multi_pass_path))
+
+    # # Check if there are multiple frame ranges across the takes
+    first_frame_range = submit_takes[0].frame_range
+    per_take_frames_parameters = not settings.override_frame_range and any(
+        take.frame_range != first_frame_range for take in submit_takes
+    )
+
+    # If there are multiple frame ranges and we're not overriding the range,
+    # then we create per-take Frames parameters.
+    if per_take_frames_parameters:
+        for take_data in submit_takes:
+            take_data.frames_parameter_name = f"{take_data.display_name}Frames"
+
+    renderers: set[str] = {take_data.renderer_name for take_data in submit_takes}
+    job_template = _get_job_template(settings, renderers, submit_takes)
+    parameter_values = _get_parameter_values(settings, renderers, queue_parameters)
+
+    # If "HostRequirements" is provided, inject it into each of the "Step"
+    if host_requirements:
+        # for each step in the template, append the same host requirements.
+        for step in job_template["steps"]:
+            step["hostRequirements"] = host_requirements
+
+    save_job_bundle_files(job_bundle_path, job_template, parameter_values, asset_references)
+
+    # Save Sticky Settings
+    settings.input_filenames = sorted(attachments.input_filenames)
+    settings.input_directories = sorted(attachments.input_directories)
+
+    settings.save_sticky_settings(Scene.name())
+
+def setup_auto_detected_attachments(take_data_list: list[TakeData]) -> AssetReferences:
+    """
+    Set up automatically detected attachments from the scene and takes.
+    """
+    auto_detected_attachments = AssetReferences()
+    introspector = AssetIntrospector()
+    
+    # Get scene assets
+    auto_detected_attachments.input_filenames = set(
+        os.path.normpath(path) for path in introspector.parse_scene_assets()
+    )
+    
+    # Add output directories from takes
+    for take_data in take_data_list:
+        auto_detected_attachments.output_directories.update(take_data.output_directories)
+        
+    return auto_detected_attachments
+
+def setup_attachments(render_settings: RenderSubmitterUISettings) -> AssetReferences:
+    """
+    Create AssetReferences from render settings.
+    """
+    return AssetReferences(
+        input_filenames=set(render_settings.input_filenames),
+        input_directories=set(render_settings.input_directories),
+        output_directories=set(render_settings.output_directories),
+    )
+
+
+def get_conda_packages() -> str:
+    """
+    Get the required conda packages string based on C4D version.
+    """
+    c4d_major_version = str(c4d.GetC4DVersion())[:4]
+    adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
+    return f"cinema4d={c4d_major_version}.* cinema4d-openjd={adaptor_version}.*"
+
+
+def _show_submitter(parent=None, f=Qt.WindowFlags()):
+
+    render_settings = initialize_render_settings()
+
+    doc = c4d.documents.GetActiveDocument()
+
+    take_data_list, current_data_list, marked_data_list, main_data_list = process_takes(doc)
+
+    auto_detected_attachments = setup_auto_detected_attachments(take_data_list)
+    attachments = setup_attachments(render_settings)
+
+    conda_packages = get_conda_packages()
 
     def on_create_job_bundle_callback(
         widget: SubmitJobToDeadlineDialog,
@@ -358,79 +486,18 @@ def _show_submitter(parent=None, f=Qt.WindowFlags()):
         host_requirements: Optional[dict[str, Any]] = None,
         purpose: JobBundlePurpose = JobBundlePurpose.SUBMISSION,
     ) -> None:
-        submit_takes = main_data_list
-        job_bundle_path = Path(job_bundle_dir)
-        if settings.take_selection == TakeSelection.MAIN:
-            submit_takes = main_data_list
-        if settings.take_selection == TakeSelection.ALL:
-            submit_takes = take_data_list
-        if settings.take_selection == TakeSelection.MARKED:
-            submit_takes = marked_data_list
-        if settings.take_selection == TakeSelection.CURRENT:
-            submit_takes = current_data_list
+        print("In create job callback")
+        print(f"Job_bundle_dir={job_bundle_dir}")
+        print(f"Queue params= {queue_parameters}")
+        print(f"Host req= {host_requirements}")
+        print(f"job attachments = {widget.job_attachments.attachments}")
+        print(f"Asset refernces = {asset_references}")
+        process_job_bundle(settings, take_data_list, current_data_list, marked_data_list, main_data_list, job_bundle_dir, asset_references, queue_parameters, host_requirements, widget.job_attachments.attachments)
 
-        # Add overrides to asset references
-        if settings.output_path:
-            asset_references.output_directories.add(os.path.dirname(settings.output_path))
-        if settings.multi_pass_path:
-            asset_references.output_directories.add(os.path.dirname(settings.multi_pass_path))
-
-        # # Check if there are multiple frame ranges across the takes
-        first_frame_range = submit_takes[0].frame_range
-        per_take_frames_parameters = not settings.override_frame_range and any(
-            take.frame_range != first_frame_range for take in submit_takes
-        )
-
-        # If there are multiple frame ranges and we're not overriding the range,
-        # then we create per-take Frames parameters.
-        if per_take_frames_parameters:
-            for take_data in submit_takes:
-                take_data.frames_parameter_name = f"{take_data.display_name}Frames"
-
-        renderers: set[str] = {take_data.renderer_name for take_data in submit_takes}
-        job_template = _get_job_template(settings, renderers, submit_takes)
-        parameter_values = _get_parameter_values(settings, renderers, queue_parameters)
-
-        # If "HostRequirements" is provided, inject it into each of the "Step"
-        if host_requirements:
-            # for each step in the template, append the same host requirements.
-            for step in job_template["steps"]:
-                step["hostRequirements"] = host_requirements
-
-        with open(job_bundle_path / "template.yaml", "w", encoding="utf8") as f:
-            deadline_yaml_dump(job_template, f, indent=1)
-
-        with open(job_bundle_path / "parameter_values.yaml", "w", encoding="utf8") as f:
-            deadline_yaml_dump({"parameterValues": parameter_values}, f, indent=1)
-
-        with open(job_bundle_path / "asset_references.yaml", "w", encoding="utf8") as f:
-            deadline_yaml_dump(asset_references.to_dict(), f, indent=1)
-
-        # Save Sticky Settings
-        attachments: AssetReferences = widget.job_attachments.attachments
-        settings.input_filenames = sorted(attachments.input_filenames)
-        settings.input_directories = sorted(attachments.input_directories)
-        settings.input_filenames = sorted(attachments.input_filenames)
-
-        settings.save_sticky_settings(Scene.name())
-
-    auto_detected_attachments = AssetReferences()
-    introspector = AssetIntrospector()
-    auto_detected_attachments.input_filenames = set(
-        os.path.normpath(path) for path in introspector.parse_scene_assets()
-    )
-
-    for take_data in take_data_list:
-        auto_detected_attachments.output_directories.update(take_data.output_directories)
-    attachments = AssetReferences(
-        input_filenames=set(render_settings.input_filenames),
-        input_directories=set(render_settings.input_directories),
-        output_directories=set(render_settings.output_directories),
-    )
-
-    c4d_major_version = str(c4d.GetC4DVersion())[:4]
-    adaptor_version = ".".join(str(v) for v in adaptor_version_tuple[:2])
-    conda_packages = f"cinema4d={c4d_major_version}.* cinema4d-openjd={adaptor_version}.*"
+    print("In show_submitter")
+    print(f"Autodetected attachments= {auto_detected_attachments}")
+    print(f"Attachments = {attachments}")
+    print(f"Conda packages = {conda_packages}")
 
     submitter_dialog = SubmitJobToDeadlineDialog(
         job_setup_widget_type=SceneSettingsWidget,
@@ -447,3 +514,29 @@ def _show_submitter(parent=None, f=Qt.WindowFlags()):
     )
 
     return submitter_dialog
+
+def dummy_queue_params() -> list:
+    return [
+        {'default': 'cinema4d=2024 cinema4d-openjd', 'description': 'This is a space-separated list of Conda package match specifications to install for the job. E.g. "blender=3.6" for a job that renders frames in Blender 3.6.\nSee https://docs.conda.io/projects/conda/en/latest/user-guide/concepts/pkg-specs.html#package-match-specifications\n', 'name': 'CondaPackages', 'type': 'STRING', 'userInterface': {'control': 'LINE_EDIT', 'groupLabel': 'Queue Environment: Conda', 'label': 'Conda Packages'}, 'value': get_conda_packages()}, 
+        {'default': 'deadline-cloud', 'description': 'This is a space-separated list of Conda channels from which to install packages. Deadline Cloud SMF packages are installed from the "deadline-cloud" channel that is configured by Deadline Cloud.\nAdd "conda-forge" to get packages from the https://conda-forge.org/ community, and "defaults" to get packages from Anaconda Inc (make sure your usage complies with https://www.anaconda.com/terms-of-use).\n', 'name': 'CondaChannels', 'type': 'STRING', 'userInterface': {'control': 'LINE_EDIT', 'groupLabel': 'Queue Environment: Conda', 'label': 'Conda Channels'}, 'value': 'deadline-cloud'}, 
+        {'name': 'deadline:targetTaskRunStatus', 'type': 'STRING', 'userInterface': {'control': 'DROPDOWN_LIST', 'label': 'Initial state'}, 'allowedValues': ['READY', 'SUSPENDED'], 'value': 'READY'}, 
+        {'name': 'deadline:maxFailedTasksCount', 'description': 'Maximum number of Tasks that can fail before the Job will be marked as failed.', 'type': 'INT', 'userInterface': {'control': 'SPIN_BOX', 'label': 'Maximum failed tasks count'}, 'minValue': 0, 'value': 20}, 
+        {'name': 'deadline:maxRetriesPerTask', 'description': "Maximum number of times that a task will retry before it's marked as failed.", 'type': 'INT', 'userInterface': {'control': 'SPIN_BOX', 'label': 'Maximum retries per task'}, 'minValue': 0, 'value': 5}, 
+        {'name': 'deadline:priority', 'type': 'INT', 'value': 50}
+    ]
+
+def dummy_host_requirements() -> Any:
+    return None
+
+def internal_create_job_bundle(job_bundle_dir):
+    render_settings = initialize_render_settings()
+
+    doc = c4d.documents.GetActiveDocument()
+
+    take_data_list, current_data_list, marked_data_list, main_data_list = process_takes(doc)
+
+    auto_detected_attachments = setup_auto_detected_attachments(take_data_list)
+    attachments = setup_attachments(render_settings)
+
+    # auto_detected_attachments is equal to asset references in create job bundle callback.
+    process_job_bundle(render_settings, take_data_list, current_data_list, marked_data_list, main_data_list, job_bundle_dir, auto_detected_attachments, dummy_queue_params(), dummy_host_requirements(), attachments)

@@ -18,14 +18,7 @@ See [DEVELOPMENT.md](https://github.com/aws-deadline/deadline-cloud-for-cinema-4
 - Have you run the unit tests?
 *delete text ending here*
 
-### Did you run the "Job Bundle Output Tests"? If not, why not? If so, paste the test results here.
-
-*delete text starting here*
-See the "Integration Tests" subsection of the
-[Running Submitter Tests](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/blob/mainline/DEVELOPMENT.md#running-submitter-tests)
-section of DEVELOPMENT.md for information on these tests.
-
-*delete text ending here*
+#### Please run the integration tests and paste the results below
 
 ### Was this change documented?
 
