@@ -44,10 +44,10 @@ class TakeData:
     marked: bool
 
 
-def show_submitter():
+def show_submitter(test=False, job_bundle_override_dir=None):
 
     if _prompt_save_current_document() is False:
-        return
+        return None
 
     try:
         app = QtWidgets.QApplication.instance()
@@ -56,14 +56,18 @@ def show_submitter():
             app.setQuitOnLastWindowClosed(False)
             app.aboutToQuit.connect(app.deleteLater)
         app.setStyleSheet(C4D_STYLE)
-        w = _show_submitter(None)
+        w = _show_submitter(None, job_bundle_override_dir)
         w.setStyleSheet(C4D_STYLE)
-        w.exec_()
+        if not test:
+            w.exec_()
+            return None
+        return w
     except Exception:
-        print("Deadline UI launch failed")
+        print("Deadline UI launch failed1")
         import traceback
 
         traceback.print_exc()
+        return None
 
 
 def _get_parameter_values(
@@ -488,7 +492,7 @@ def get_conda_packages() -> str:
     return f"cinema4d={c4d_major_version}.* cinema4d-openjd={adaptor_version}.*"
 
 
-def _show_submitter(parent=None, f=Qt.WindowFlags()):
+def _show_submitter(parent=None, job_bundle_override_dir=None, f=Qt.WindowFlags()):
     """
     Creates and returns a submission dialog for rendering jobs.
 
@@ -520,6 +524,8 @@ def _show_submitter(parent=None, f=Qt.WindowFlags()):
         """
         Callback function for creating a job bundle when submitting the job.
         """
+        if job_bundle_override_dir is not None:
+            job_bundle_dir = job_bundle_override_dir
         create_job_bundle(
             settings,
             takes,

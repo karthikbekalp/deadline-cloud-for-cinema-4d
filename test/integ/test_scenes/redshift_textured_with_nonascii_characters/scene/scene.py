@@ -3,7 +3,8 @@ import struct
 import sys
 
 import c4d
-from deadline.cinema4d_submitter.integ_test_helpers import internal_create_job_bundle
+# from deadline.cinema4d_submitter.integ_test_helpers import submitter_dialog_test
+from deadline.cinema4d_submitter.integ_qt_helpers import submitter_dialog_test
 
 
 def create_checkerboard_bmp(
@@ -67,8 +68,10 @@ def main():
     cube = create_cube()
     doc.InsertObject(cube)
 
+    save_dir = sys.argv[1]
+
     # Create texture
-    tex_dir = os.path.join(sys.argv[1], "tex")
+    tex_dir = os.path.join(save_dir, "tex")
     os.makedirs(tex_dir, exist_ok=True)
     texture_filename = "checkerboard-_₿_ę_ñ_β_Б_ت.bmp"
     texture_path = os.path.join(tex_dir, texture_filename)
@@ -86,7 +89,6 @@ def main():
     setup_render_settings(doc, frame_time, frame_time)
 
     # Save document
-    save_dir = sys.argv[1]
     save_name = "redshift_textured-_₿_ę_ñ_β_Б_ت.c4d"
     save_path = os.path.join(save_dir, save_name)
     doc.SetDocumentPath(save_dir)
@@ -94,7 +96,9 @@ def main():
     c4d.documents.SaveDocument(doc, save_path, c4d.SAVEDOCUMENTFLAGS_0, c4d.FORMAT_C4DEXPORT)
     c4d.documents.InsertBaseDocument(doc)
     c4d.EventAdd()
-    internal_create_job_bundle(save_dir)
+    # internal_create_job_bundle(save_dir)
+    print("In scene.py")
+    submitter_dialog_test(save_dir)
 
 
 if __name__ == "__main__":
