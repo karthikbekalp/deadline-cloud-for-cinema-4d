@@ -17,6 +17,7 @@ from qtpy.QtWidgets import (  # type: ignore
 )
 
 from ...takes import TakeSelection
+from deadline.client.ui.widgets.job_timeouts_widget import TimeoutTableWidget
 
 """
 UI widgets for the Scene Settings tab.
@@ -127,11 +128,14 @@ class SceneSettingsWidget(QWidget):
         lyt.addWidget(self.frame_override_txt, 4, 1)
         self.frame_override_chck.stateChanged.connect(self.activate_frame_override_changed)
 
+        self.timeout_settings_box = TimeoutTableWidget(timeouts=settings.timeouts, parent=self)
+        lyt.addWidget(self.timeout_settings_box, 5, 0, 1, 2)
+
         if self.developer_options:
             self.include_adaptor_wheels = QCheckBox(
                 "Developer Option: Include Adaptor Wheels", self
             )
-            lyt.addWidget(self.include_adaptor_wheels, 5, 0)
+            lyt.addWidget(self.include_adaptor_wheels, 6, 0)
 
         lyt.addItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding), 10, 0)
 
@@ -164,6 +168,8 @@ class SceneSettingsWidget(QWidget):
         settings.frame_list = self.frame_override_txt.text()
 
         settings.take_selection = self.layers_box.currentData()
+
+        self.timeout_settings_box.update_settings(settings.timeouts)
 
         if self.developer_options:
             settings.include_adaptor_wheels = self.include_adaptor_wheels.isChecked()

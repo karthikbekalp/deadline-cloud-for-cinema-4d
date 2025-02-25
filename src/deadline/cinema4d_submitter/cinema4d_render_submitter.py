@@ -18,6 +18,7 @@ from deadline.client.ui.dialogs.submit_job_to_deadline_dialog import (  # pylint
     JobBundlePurpose,
     SubmitJobToDeadlineDialog,
 )
+from .template_timeout_patcher import add_timeouts_to_job_template
 
 from ._version import version_tuple as adaptor_version_tuple
 from .assets import AssetIntrospector
@@ -250,6 +251,8 @@ def _get_job_template(
         if "jobEnvironments" not in job_template:
             job_template["jobEnvironments"] = []
         job_template["jobEnvironments"].append(override_environment["environment"])
+
+    add_timeouts_to_job_template(job_template, settings.timeouts)
 
     return job_template
 
