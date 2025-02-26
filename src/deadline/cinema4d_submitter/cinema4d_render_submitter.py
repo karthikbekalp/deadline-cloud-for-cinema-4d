@@ -66,6 +66,19 @@ def show_submitter():
         traceback.print_exc()
 
 
+def _update_paths_with_cinema4d_tokens_values(path: str) -> str:
+    doc = c4d.documents.GetActiveDocument()
+    render_data = Scene.get_render_data(doc=doc, take=None)
+    rbc = render_data.GetDataInstance()
+    rpd = {
+        "_doc": doc,
+        "_rData": render_data,
+        "_rBc": rbc,
+        "_frame": doc.GetTime().GetFrame(doc.GetFps()),
+    }
+    return c4d.modules.tokensystem.FilenameConvertTokens(path, rpd)
+
+
 def _get_parameter_values(
     settings: RenderSubmitterUISettings,
     renderers: set[str],
@@ -75,8 +88,18 @@ def _get_parameter_values(
 
     # Set the c4d scene file value
     parameter_values.append({"name": "Cinema4DFile", "value": Scene.name()})
-    parameter_values.append({"name": "OutputPath", "value": settings.output_path})
-    parameter_values.append({"name": "MultiPassPath", "value": settings.multi_pass_path})
+    parameter_values.append(
+        {
+            "name": "OutputPath",
+            "value": _update_paths_with_cinema4d_tokens_values(settings.output_path),
+        }
+    )
+    parameter_values.append(
+        {
+            "name": "MultiPassPath",
+            "value": _update_paths_with_cinema4d_tokens_values(settings.multi_pass_path),
+        }
+    )
 
     if settings.override_frame_range:
         frame_list = settings.frame_list
