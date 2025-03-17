@@ -8,11 +8,35 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from deadline.client.ui.dataclasses.timeouts import TimeoutEntry, TimeoutTableEntries
+
 from .takes import TakeSelection  # type: ignore
+from datetime import timedelta
 
 RENDER_SUBMITTER_SETTINGS_FILE_EXT = ".deadline_render_settings.json"
 
 _logger = logging.getLogger(__name__)
+
+
+def default_timeout_entries() -> TimeoutTableEntries:
+    entries = {
+        "Task Run": TimeoutEntry(
+            tooltip="Maximum duration for a task run or for rendering a frame.",
+            seconds=int(timedelta(days=2).total_seconds()),
+            is_activated=True,
+        ),
+        "Cinema 4D launch": TimeoutEntry(
+            tooltip="Maximum duration for Cinema 4D to launch. In general, this takes less than a minute.",
+            is_activated=True,
+            seconds=int(timedelta(minutes=10).total_seconds()),
+        ),
+        "Cinema 4D shutdown": TimeoutEntry(
+            tooltip="Maximum duration for Cinema 4D to shutdown gracefully. In general, this takes less than 5 seconds.",
+            is_activated=True,
+            seconds=int(timedelta(minutes=5).total_seconds()),
+        ),
+    }
+    return TimeoutTableEntries(entries=entries)
 
 
 @dataclass
@@ -36,6 +60,9 @@ class RenderSubmitterUISettings:
     output_directories: list[str] = field(default_factory=list, metadata={"sticky": True})
 
     take_selection: TakeSelection = field(default=TakeSelection.MAIN)
+    timeouts: TimeoutTableEntries = field(
+        default_factory=default_timeout_entries, metadata={"sticky": True}
+    )
 
     # developer options
     include_adaptor_wheels: bool = field(default=False, metadata={"sticky": True})
@@ -58,7 +85,10 @@ class RenderSubmitterUISettings:
                     for name, value in sticky_settings.items():
                         # Only set fields that are defined in the dataclass
                         if name in sticky_fields:
-                            setattr(self, name, value)
+                            if name == "timeouts":
+                                self.timeouts.update_from_sticky_settings(value)
+                            else:
+                                setattr(self, name, value)
             except (OSError, json.JSONDecodeError):
                 # If something bad happened to the sticky settings file,
                 # just use the defaults instead of producing an error.
@@ -78,8 +108,9 @@ class RenderSubmitterUISettings:
                 obj = {
                     field.name: getattr(self, field.name)
                     for field in dataclasses.fields(self)
-                    if field.metadata.get("sticky")
+                    if field.metadata.get("sticky") and field.name != "timeouts"
                 }
+                obj["timeouts"] = self.timeouts.to_sticky_settings_dict()
                 json.dump(obj, fh, indent=1)
         except OSError as e:
             traceback.print_exc()
