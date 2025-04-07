@@ -24,7 +24,6 @@ def init_data() -> dict:
 
 
 class TestCinema4DAdaptor_on_cleanup:
-
     @pytest.mark.parametrize(
         "stdout,error_expected",
         [
@@ -79,6 +78,37 @@ class TestCinema4DAdaptor_on_cleanup:
             assert str(adaptor._exc_info) == f"Cinema4D Encountered an Error: {stdout}"
         else:
             assert match is None
+
+    @pytest.mark.parametrize(
+        "stdout",
+        [
+            # Redshift errors should provide better message.
+            ("Failed to allocate mem( 1045504 bytes)"),
+        ],
+    )
+    def test_handle_insufficient_ram_on_stdout(self, init_data: dict, stdout: str) -> None:
+        """Tests that the _handle_insufficient_ram method throws a error runtime error correctly"""
+        # GIVEN
+        adaptor = Cinema4DAdaptor(init_data)
+        regex_callbacks = adaptor._get_regex_callbacks()
+        # Currently the callback for insufficient RAM is at index 3
+        regexes = regex_callbacks[3].regex_list
+
+        # WHEN
+        for regex in regexes:
+            match = regex.search(stdout)
+            if match:
+                adaptor._handle_insufficient_ram(match)
+                break
+
+        # THEN
+        assert match is not None
+        assert str(adaptor._exc_info) == (
+            "Redshift requires more RAM to render. "
+            "Please increase the worker's RAM to at least double the worker's GPU VRAM. For more info: "
+            "https://help.maxon.net/c4d/s26/de-de/Content/_REDSHIFT_/html/Dealing+with+Out-Of-RAM+situations.html. "
+            f"Error: {stdout}"
+        )
 
 
 def test_adaptor_rejects_malformed_init_data():
