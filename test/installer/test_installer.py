@@ -32,7 +32,7 @@ def _is_admin() -> bool:
 
 @pytest.fixture(scope="session")
 def installer_path():
-    path = "DeadlineCloudForCinema4dSubmitter-{platform}-installer.{ext}"
+    path = "DeadlineCloudForCinema4DSubmitter-{platform}-installer.{ext}"
 
     if platform.system() == "Darwin":
         path = os.path.join(
