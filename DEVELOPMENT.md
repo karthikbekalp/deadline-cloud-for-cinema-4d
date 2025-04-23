@@ -15,7 +15,8 @@ Table of Contents:
       * [Running the Adaptor Locally](#running-the-adaptor-locally)
       * [Running the Adaptor on a Farm](#running-the-adaptor-on-a-farm)
       * [Testing the Adaptor](#testing-the-adaptor)
-   * [Running the integration tests](#integration-tests-currently-wip)
+   * [Running the integration tests](#integration-tests)
+   * [User guide](#user-guide)
 
 ## Development Environment Setup
 
@@ -245,3 +246,6 @@ For redshift licensing, set the environment variable by using `$env:redshift_LIC
    During my testing, pywin32's version 308 was required because of other dependencies requiring this version.
 3. Run `hatch run integ:test`
 
+## User guide
+
+The user guide is generated from the markdown files in `docs/user_guide` and published to GitHub pages. To view the renderd user guide locally, run `hatch run docs:serve` which will open the user guide in your browser.
