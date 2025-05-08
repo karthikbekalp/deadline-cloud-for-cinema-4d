@@ -50,8 +50,8 @@ It automatically determines the files required based on the loaded scene, allows
 The submitter includes your settings, such as Redshift plugin settings and multi-pass paths, in the submission to Deadline Cloud.
 
 There are two installation options:
-1. Windows-only: the [official Deadline Cloud submitter installer][deadline-cloud-submitter]
-2. Windows or Mac: manual installation
+1. The [official Deadline Cloud submitter installer][deadline-cloud-submitter] (Recommended)
+2. Manual installation
 
 After installing, you can access the submitter in the Cinema 4D interface via `Extensions` > `AWS Deadline Cloud Submitter`.
 
