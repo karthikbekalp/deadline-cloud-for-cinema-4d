@@ -33,6 +33,12 @@ import c4d
 # Plugin ID generator for DeadlineCloudSubmitter.
 PLUGIN_ID = 1064358
 
+if sys.platform == "darwin":
+    # This command opens the RS renderview panel at
+    # Cinema 4D startup until Maxon fixes the issue 
+    # of Cinema 4D crashing due to PyQt errors on their end.
+    c4d.CallCommand(1038666)
+
 class DeadlineCloudRenderCommand(c4d.plugins.CommandData):
 
     def _import_and_show_submitter(self):
