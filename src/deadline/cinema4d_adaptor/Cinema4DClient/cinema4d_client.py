@@ -87,25 +87,39 @@ class Cinema4DClient(ClientInterface):
 
             # If submission was not from Mac (i.e. not posix source format), just do normal path mapping
             if not has_posix_format:
-                return super().map_path(path)
+                mapped_path = super().map_path(path)
+                print(f"Using normal path mapping (non-POSIX): '{path}' -> '{mapped_path}'")
+                return mapped_path
 
-            print("Source path format is POSIX and rendering on Windows")
-            print(f"Path before conversion: {path}")
+            print(
+                "Found POSIX format rule, converting path separators for Mac to Windows compatibility"
+            )
+            print(f"Original path: '{path}'")
 
             # Convert backslashes to forward slashes for consistency with POSIX paths.
             # This is safe because:
             # 1. When submitting from Mac, backslashes can only appear as path separators
             # 2. Windows accepts both '\' and '/' as valid path separators
             converted_path = path.replace("\\", "/")
-            print(f"Path after replacing backslashes: {converted_path}")
+            print(f"Converted path: '{converted_path}'")
 
-            # Then get the mapped path using parent implementation
-            return super().map_path(converted_path)
+            # Try path mapping with converted path
+            mapped_path = super().map_path(converted_path)
+
+            # If mapped path is the same as converted path, mapping failed
+            # so try with original path instead
+            if mapped_path == converted_path:
+                print("Path mapping with converted path failed (no rules matched)")
+                mapped_path = super().map_path(path)
+                print(f"Using original path mapping: '{path}' -> '{mapped_path}'")
+                return mapped_path
+
+            print(f"Successfully mapped converted path: '{converted_path}' -> '{mapped_path}'")
+            return mapped_path
 
         except Exception as e:
             print(f"Error during path mapping: {str(e)}")
-            # If anything goes wrong during our path conversion,
-            # fall back to parent implementation with original path
+            # If anything goes wrong, fall back to parent implementation with original path
             return super().map_path(path)
 
 
