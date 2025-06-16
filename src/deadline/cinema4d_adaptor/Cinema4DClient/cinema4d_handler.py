@@ -315,5 +315,6 @@ class Cinema4DHandler:
         if doc is None:
             print("Error: LoadDocument failed: %s" % scene_file)
         else:
+            doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
             c4d.documents.InsertBaseDocument(doc)
             c4d.documents.SetActiveDocument(doc)
