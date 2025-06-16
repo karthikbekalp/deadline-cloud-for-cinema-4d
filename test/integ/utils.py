@@ -113,6 +113,26 @@ def replace_backslashes(content: str) -> str:
     return content
 
 
+def normalize_paths_in_content(content: str) -> str:
+    """
+    Normalize paths in content by removing line breaks and extra whitespace within quoted paths.
+    This is particularly useful for YAML files where paths may be split across multiple lines.
+    """
+    # Pattern to match quoted paths that might span multiple lines
+    # This regex looks for strings in quotes that contain path-like characters
+    pattern = r'"([^"]*?(?:/|\\)[^"]*?)"'
+    
+    def normalize_path(match):
+        # Get the path inside the quotes
+        path = match.group(1)
+        # Remove line breaks and normalize whitespace
+        normalized_path = re.sub(r'\s*\n\s*', '', path)
+        return f'"{normalized_path}"'
+    
+    # Replace all matching paths with their normalized versions
+    return re.sub(pattern, normalize_path, content)
+
+
 def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     expected_job_bundle_dir_path: Path, generated_job_bundle_dir_path: Path
 ) -> None:
@@ -145,7 +165,7 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
         file1_path = expected_job_bundle_dir_path / file
         file2_path = generated_job_bundle_dir_path / file
 
-        # Read files and compare their contents directly
+        # Read files and normalize their content
         with (
             open(file1_path, "r", encoding="utf-8") as f1,
             open(file2_path, "r", encoding="utf-8") as f2,
@@ -161,6 +181,10 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
             content1 = content1.replace("PATH_TO_BE_REPLACED", prefix_path)
             content1 = replace_backslashes(content1)
             content2 = replace_backslashes(content2)
+            
+            # Normalize paths in content to handle multiline paths
+            content1 = normalize_paths_in_content(content1)
+            content2 = normalize_paths_in_content(content2)
 
             if content1 == content2:
                 results["identical_files"].append(file)
