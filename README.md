@@ -28,7 +28,7 @@ This library requires:
    * Redshift is supported but not required
 2. Python 3.9 or higher; but Python 3.11 is recommended as this is the version Cinema 4D uses natively.
 3. Windows or macOS operating system for job submission and Windows operating system for job rendering. There are some instructions below on how to setup the adaptors for job rendering on Linux but they are experimental.
-4. When rendering using Redshift with Cinema 4D on NVIDIA GPUs, driver version 551.78 or later is required. Using older drivers can result in job failures.
+4. When rendering using Redshift with Cinema 4D on NVIDIA GPUs, NVIDIA GRID driver version 551.78 or later is required. Using older drivers can result in job failures.
 
 **Important:** Workers hosts with GPUs that run the Cinema 4D adaptor must have sufficient RAM (at least 2x the amount of VRAM) to run Cinema 4D correctly. For example, if your GPU has 16GB VRAM, your system should have at least 32GB RAM. Insufficient memory can lead to [unstable rendering behavior](https://help.maxon.net/c4d/s26/de-de/Content/_REDSHIFT_/html/Dealing+with+Out-Of-RAM+situations.html).
 
@@ -129,7 +129,7 @@ renders can be a significant time-saving optimization; particularly when the ren
 
 **Important:** Workers hosts with GPUs must have sufficient RAM (at least 2x the amount of VRAM) to run Cinema 4D correctly. For example, if your GPU has 16GB VRAM, your system should have at least 32GB RAM. Insufficient memory can lead to [unstable rendering behavior](https://help.maxon.net/c4d/s26/de-de/Content/_REDSHIFT_/html/Dealing+with+Out-Of-RAM+situations.html).
 
-**Note for Redshift users:** When rendering with Redshift on NVIDIA GPUs, driver version 551.78 or later is required. Using older drivers can result in job failures.
+**Note for Redshift users:** When rendering with Redshift on NVIDIA GPUs, NVIDIA GRID driver version 551.78 or later is required. Using older drivers can result in job failures.
 
 Both fleet types in Deadline Cloud support the Cinema 4D adaptor:
 1. Service managed fleets
