@@ -143,7 +143,7 @@ class SceneSettingsWidget(QWidget):
         export_layout.addWidget(self.export_job_bundle_chck)
 
         warning_label = QLabel(
-            "⚠️ This option temporarily uses additional disk space and takes longer to submit, "
+            "This option temporarily uses additional disk space and takes longer to submit, "
             "but it bundles the scene with its assets and fixes the paths to increase the likelihood of successful jobs."
         )
         warning_label.setWordWrap(True)

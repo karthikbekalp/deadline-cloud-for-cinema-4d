@@ -485,12 +485,16 @@ def create_job_bundle(
 
     # Save Sticky Settings
     if settings.export_job_bundle_to_temp:
+        # Close temporary document
+        c4d.documents.KillDocument(c4d.documents.GetActiveDocument())
+
         # Restore the original Cinema4DFile to be the active document.
         doc = c4d.documents.LoadDocument(
             original_cinema4d_file, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS
         )
         c4d.documents.InsertBaseDocument(doc)
         c4d.documents.SetActiveDocument(doc)
+
     settings.input_filenames = sorted(attachments.input_filenames)
     settings.input_directories = sorted(attachments.input_directories)
 
