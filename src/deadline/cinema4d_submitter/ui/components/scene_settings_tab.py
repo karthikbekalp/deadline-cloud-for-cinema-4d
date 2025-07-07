@@ -134,17 +134,17 @@ class SceneSettingsWidget(QWidget):
         lyt.addWidget(self.timeout_settings_box, 5, 0, 1, 2)
 
         # Create a group box for the export job bundle option
-        export_group_box = QGroupBox("Job Bundle Export Options", self)
+        export_group_box = QGroupBox("Cinema 4D submission options", self)
         export_layout = QVBoxLayout(export_group_box)
 
         self.export_job_bundle_chck = QCheckBox(
-            "Export job bundle to temporary folder before submission", self
+            "Save Cinema 4D project with Assets before submission", self
         )
         export_layout.addWidget(self.export_job_bundle_chck)
 
         warning_label = QLabel(
-            "This option temporarily uses additional disk space and takes longer to submit, "
-            "but it bundles the scene with its assets and fixes the paths to increase the likelihood of successful jobs."
+            "Prevents missing file errors during rendering by creating a temporary copy of your project with all assets "
+            "and fixing file paths before submission. Uses more disk space and submission time."
         )
         warning_label.setWordWrap(True)
         export_layout.addWidget(warning_label)
