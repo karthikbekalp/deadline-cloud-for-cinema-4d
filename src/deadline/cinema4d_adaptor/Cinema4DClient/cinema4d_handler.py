@@ -319,9 +319,18 @@ class Cinema4DHandler:
             # This is essential for dynamic content like Pyro simulations (fluid/smoke effects)
             # which would otherwise render as blank. The parameters ensure all necessary
             # elements (animation, expressions, caches) are processed.
-            doc.ExecutePasses(
+            ret_value = doc.ExecutePasses(
                 bt=None, animation=True, expressions=True, caches=True, flags=c4d.BUILDFLAGS_NONE
             )
+            print(f"The ret_value from ExecutePasses is {ret_value}")
+
+            asset_list = []
+
+            asset_data: list[dict] = []
+            val = c4d.documents.GetAllAssetsNew(doc, False, "", c4d.ASSETDATA_FLAG_NONE, asset_data)
+            print("Printing the assets:")
+            for item in asset_data:
+                print(os.path.split(item.get("filename", ""))[-1])
 
             c4d.documents.InsertBaseDocument(doc)
             c4d.documents.SetActiveDocument(doc)
