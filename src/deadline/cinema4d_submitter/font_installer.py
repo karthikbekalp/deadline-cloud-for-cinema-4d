@@ -9,28 +9,10 @@ import logging
 import os
 import shutil
 import sys
-import traceback
 from pathlib import Path
-from typing import Set, Tuple
+from typing import Set
 
-_TEMP_FONTS_DIR = "tempFonts"
-
-if sys.platform == "win32":
-    from ctypes import wintypes
-
-    try:
-        import winreg
-    except ImportError:
-        import _winreg as winreg  # type: ignore
-
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
-else:
-    # Stub for non-Windows platforms
-    winreg = None  # type: ignore
-    user32 = None  # type: ignore
-    gdi32 = None  # type: ignore
-    wintypes = None  # type: ignore
+FONTS_DIR = "fonts"
 
 FONTS_REG_PATH = r"Software\Microsoft\Windows NT\CurrentVersion\Fonts"
 
@@ -55,6 +37,118 @@ FONT_EXTENSIONS = [".otf", ".ttf", ".fon", ""]
 logger = logging.getLogger(__name__)
 
 
+def is_windows() -> bool:
+    """
+    Check if the current platform is Windows.
+
+    Returns:
+        bool: True if running on Windows, False otherwise
+    """
+    return sys.platform == "win32"
+
+
+def _collect_fonts_from_directory(fonts_dir: str) -> Set[str]:
+    """
+    Collect all valid font files from a given directory.
+
+    :param fonts_dir: path to the fonts directory
+    :returns: set of font file paths found in the directory
+    """
+    fonts = set()
+
+    try:
+        for file_name in os.listdir(fonts_dir):
+            full_path = os.path.join(fonts_dir, file_name)
+
+            # Skip non-files (directories, symlinks, etc.)
+            if not os.path.isfile(full_path):
+                continue
+
+            _, ext = os.path.splitext(full_path)
+            if ext.lower() in FONT_EXTENSIONS:
+                logger.debug(f"Adding font: {full_path}")
+                fonts.add(full_path)
+            else:
+                logger.warning(f"Non-font file found in {FONTS_DIR} folder: {full_path}")
+
+    except (OSError, PermissionError) as e:
+        logger.warning(f"Could not access fonts directory {fonts_dir}: {e}")
+
+    return fonts
+
+
+def _find_fonts_recursive(session_dir: str) -> Set[str]:
+    """
+    Recursively search for fonts directory in session_dir.
+
+    :param session_dir: the root folder in which to look for files
+    :returns: set of font file paths found via recursive search
+    """
+    logger.info("Using recursive font search approach")
+    fonts = set()
+
+    try:
+        for root, dirs, files in os.walk(session_dir):
+            for dir_name in dirs:
+                # Skip directories that are not fonts directories
+                if dir_name != FONTS_DIR:
+                    continue
+
+                fonts_dir = os.path.join(root, dir_name)
+                logger.info(f"Found {FONTS_DIR} directory: {fonts_dir}")
+
+                # Skip system fonts directories (those under .env directories)
+                if os.sep + ".env" + os.sep in fonts_dir:
+                    logger.info(f"Skipping system fonts directory under .env: {fonts_dir}")
+                    continue
+
+                # Collect fonts from this directory and add to the overall set
+                logger.info(f"Processing fonts directory: {fonts_dir}")
+                directory_fonts = _collect_fonts_from_directory(fonts_dir)
+                logger.info(f"Found {len(directory_fonts)} fonts in directory: {fonts_dir}")
+                fonts.update(directory_fonts)
+
+    except (OSError, PermissionError) as e:
+        logger.warning(f"Could not perform recursive search in session directory: {e}")
+
+    logger.info(f"Recursive search completed. Total fonts found: {len(fonts)}")
+    return fonts
+
+
+def _find_fonts_scene_based(scene_file_path: str) -> Set[str]:
+    """
+    Search for fonts directory relative to the scene file path.
+
+    :param scene_file_path: path to the scene file to use for finding fonts
+    :returns: set of font file paths found via scene-based search
+    """
+    logger.debug("Using scene-based approach")
+
+    try:
+        scene_parent_dir = Path(scene_file_path).parent
+        fonts_dir_path = scene_parent_dir / FONTS_DIR
+        logger.debug(f"Looking for fonts in scene-based directory: {fonts_dir_path}")
+
+        # Early return if fonts directory doesn't exist
+        if not fonts_dir_path.exists():
+            logger.debug(f"Scene-based {FONTS_DIR} directory not found: {fonts_dir_path}")
+            return set()
+
+        # Early return if path exists but isn't a directory
+        if not fonts_dir_path.is_dir():
+            logger.debug(f"Scene-based {FONTS_DIR} path is not a directory: {fonts_dir_path}")
+            return set()
+
+        logger.debug(f"Scene-based {FONTS_DIR} directory found: {fonts_dir_path}")
+        fonts = _collect_fonts_from_directory(str(fonts_dir_path))
+        logger.debug(f"Found {len(fonts)} fonts in scene-based {FONTS_DIR} directory")
+        return fonts
+
+    except Exception as e:
+        logger.warning(f"Error accessing scene file path for font location: {e}")
+        return set()
+
+
 def find_fonts(session_dir: str, scene_file_path: str) -> Set[str]:
     """
     Looks for all font files that were sent along with the job
@@ -67,76 +161,14 @@ def find_fonts(session_dir: str, scene_file_path: str) -> Set[str]:
     logger.debug(f"Starting font search in session_dir: {session_dir}")
     logger.debug(f"Scene file path provided: {scene_file_path}")
 
-    fonts = set()
-
-    # First, try the asset root approach
-    logger.debug("Using asset root font search approach")
-    for subfolder in os.listdir(session_dir):
-        # Only look in assetroot folders
-        if not subfolder.startswith("assetroot-"):
-            continue
-        # Look for the tempFonts folder
-        asset_dir = os.path.join(session_dir, subfolder)
-        full_sub_dir = None
-        for path, dirs, files in os.walk(asset_dir):
-            for d in dirs:
-                if _TEMP_FONTS_DIR in d:
-                    full_sub_dir = os.path.join(path, d)
-                    logger.debug(f"{_TEMP_FONTS_DIR} directory: {full_sub_dir}")
-                    break
-
-        if not full_sub_dir:
-            logger.debug(f"Couldn't recursively find {_TEMP_FONTS_DIR} in subfolder: {subfolder}")
-            continue
-
-        for file_name in os.listdir(full_sub_dir):
-            full_assetpath = os.path.join(full_sub_dir, file_name)
-            _, ext = os.path.splitext(full_assetpath)
-            if ext.lower() in FONT_EXTENSIONS:
-                logger.debug(f"Adding: {full_assetpath}")
-                fonts.add(full_assetpath)
-            else:
-                logger.warning(
-                    f"A file that is not a supported font was found in the {_TEMP_FONTS_DIR} folder: {full_assetpath}"
-                )
-
-    # If fonts were found in asset root, return them
+    # Approach 1: Recursive search for fonts directories in session_dir
+    fonts = _find_fonts_recursive(session_dir)
     if fonts:
-        logger.debug(f"Found {len(fonts)} fonts in asset root directories")
         return fonts
 
-    # Fall back to scene file path approach if no fonts found in asset root
-    logger.debug(
-        "No fonts found in asset root, trying scene-based relative path font search approach"
-    )
-    try:
-        scene_parent_dir = Path(scene_file_path).parent
-        temp_fonts_dir = scene_parent_dir / _TEMP_FONTS_DIR
-        logger.debug(f"Looking for fonts in scene-based directory: {temp_fonts_dir}")
-
-        if temp_fonts_dir.exists() and temp_fonts_dir.is_dir():
-            logger.debug(f"Scene-based {_TEMP_FONTS_DIR} directory found: {temp_fonts_dir}")
-            font_count = 0
-            for font_file in temp_fonts_dir.iterdir():
-                if font_file.is_file():
-                    _, ext = os.path.splitext(str(font_file))
-                    if ext.lower() in FONT_EXTENSIONS:
-                        logger.debug(f"Adding font from scene {_TEMP_FONTS_DIR}: {font_file}")
-                        fonts.add(str(font_file))
-                        font_count += 1
-                    else:
-                        logger.warning(
-                            f"Non-font file found in {_TEMP_FONTS_DIR} folder: {font_file}"
-                        )
-            logger.debug(f"Found {font_count} fonts in scene-based {_TEMP_FONTS_DIR} directory")
-        else:
-            logger.debug(
-                f"Scene-based {_TEMP_FONTS_DIR} directory not found or not a directory: {temp_fonts_dir}"
-            )
-    except Exception as e:
-        logger.warning(f"Error accessing scene file path for font location: {e}")
-
-    return fonts
+    # Approach 2: Scene file path approach as fallback
+    logger.debug("No fonts found via recursive search, trying scene-based approach")
+    return _find_fonts_scene_based(scene_file_path)
 
 
 def get_font_name(dst_path: str) -> str:
@@ -147,8 +179,13 @@ def get_font_name(dst_path: str) -> str:
 
     :returns: string with the font's name
     """
-    if sys.platform != "win32":
+    if not is_windows():
         raise RuntimeError("Font installation is only supported on Windows")
+
+    # Import Windows-specific modules only when needed
+    from ctypes import wintypes
+
+    gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)  # type: ignore[attr-defined]
 
     filename = os.path.basename(dst_path)
     fontname = os.path.splitext(filename)[0]
@@ -170,22 +207,32 @@ def get_font_name(dst_path: str) -> str:
     return fontname
 
 
-def install_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> Tuple[bool, str]:
+def install_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> None:
     """
     Install provided font to the worker machine
 
     :param src_path: path of font that needs to be installed
+    :param scope: installation scope (USER or SYSTEM)
 
-    :returns: boolean that represents if the font was installed and a string with any traceback that was created
+    :raises RuntimeError: if font installation fails
     """
-    if sys.platform != "win32":
-        return False, "Font installation is only supported on Windows"
+    if not is_windows():
+        logger.error("Font installation is only supported on Windows")
+        return
+
+    # Import Windows-specific modules only when needed
+    try:
+        import winreg
+    except ImportError:
+        import _winreg as winreg  # type: ignore
+
+    gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)  # type: ignore[attr-defined]
 
     try:
         # Determine font destination
         if scope == INSTALL_SCOPE_SYSTEM:
             dst_dir = FONT_LOCATION_SYSTEM
-            registry_scope = winreg.HKEY_LOCAL_MACHINE
+            registry_scope = winreg.HKEY_LOCAL_MACHINE  # type: ignore[attr-defined]
         else:
             # Check if the Fonts folder exists, create it if it doesn't
             if not os.path.exists(FONT_LOCATION_USER):
@@ -193,13 +240,13 @@ def install_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> Tuple[bool, 
                 os.makedirs(FONT_LOCATION_USER)
 
             dst_dir = FONT_LOCATION_USER
-            registry_scope = winreg.HKEY_CURRENT_USER
+            registry_scope = winreg.HKEY_CURRENT_USER  # type: ignore[attr-defined]
         dst_path = os.path.join(dst_dir, os.path.basename(src_path))
 
         # Check if font already exists at destination
         if os.path.exists(dst_path):
             logger.info(f"Font already exists at {dst_path}, skipping installation")
-            return True, ""
+            return
 
         # Copy the font to the Windows Fonts folder
         shutil.copy(src_path, dst_path)
@@ -209,50 +256,54 @@ def install_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> Tuple[bool, 
             os.remove(dst_path)
             raise OSError(f'AddFontResource failed to load "{src_path}"')
 
-        # Notify running programs
-        user32.SendMessageTimeoutW(
-            HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 1000, None
-        )
-
         # Store the fontname/filename in the registry
         filename = os.path.basename(dst_path)
         fontname = get_font_name(dst_path)
 
         # Creates registry if it doesn't exist, opens when it does exist
-        with winreg.CreateKeyEx(
-            registry_scope, FONTS_REG_PATH, 0, access=winreg.KEY_SET_VALUE
+        with winreg.CreateKeyEx(  # type: ignore[attr-defined]
+            registry_scope, FONTS_REG_PATH, 0, access=winreg.KEY_SET_VALUE  # type: ignore[attr-defined]
         ) as key:
-            winreg.SetValueEx(key, fontname, 0, winreg.REG_SZ, filename)
-    except Exception:
-        return False, traceback.format_exc()
-    return True, ""
+            winreg.SetValueEx(key, fontname, 0, winreg.REG_SZ, filename)  # type: ignore[attr-defined]
+    except Exception as e:
+        raise RuntimeError(f"Failed to install font '{src_path}': {str(e)}") from e
 
 
-def uninstall_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> Tuple[bool, str]:
+def uninstall_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> None:
     """
     Uninstall provided font from the worker machine
 
     :param src_path: path of font that needs to be removed
+    :param scope: installation scope (USER or SYSTEM)
 
-    :returns: boolean that represents if the font was uninstalled and a string with any traceback that was created
+    :raises RuntimeError: if font uninstallation fails
     """
-    if sys.platform != "win32":
-        return False, "Font uninstallation is only supported on Windows"
+    if not is_windows():
+        logger.error("Font uninstallation is only supported on Windows")
+        return
+
+    # Import Windows-specific modules only when needed
+    try:
+        import winreg
+    except ImportError:
+        import _winreg as winreg  # type: ignore
+
+    gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)  # type: ignore[attr-defined]
 
     try:
         # Determine where the font was installed
         if scope == INSTALL_SCOPE_SYSTEM:
             dst_path = os.path.join(FONT_LOCATION_SYSTEM, os.path.basename(src_path))
-            registry_scope = winreg.HKEY_LOCAL_MACHINE
+            registry_scope = winreg.HKEY_LOCAL_MACHINE  # type: ignore[attr-defined]
         else:
             dst_path = os.path.join(FONT_LOCATION_USER, os.path.basename(src_path))
-            registry_scope = winreg.HKEY_CURRENT_USER
+            registry_scope = winreg.HKEY_CURRENT_USER  # type: ignore[attr-defined]
 
         # Remove the fontname/filename from the registry
         fontname = get_font_name(dst_path)
 
-        with winreg.OpenKey(registry_scope, FONTS_REG_PATH, 0, access=winreg.KEY_SET_VALUE) as key:
-            winreg.DeleteValue(key, fontname)
+        with winreg.OpenKey(registry_scope, FONTS_REG_PATH, 0, access=winreg.KEY_SET_VALUE) as key:  # type: ignore[attr-defined]
+            winreg.DeleteValue(key, fontname)  # type: ignore[attr-defined]
 
         # Unload the font in the current session
         if not gdi32.RemoveFontResourceW(dst_path):
@@ -261,14 +312,23 @@ def uninstall_font(src_path: str, scope: str = INSTALL_SCOPE_USER) -> Tuple[bool
 
         if os.path.exists(dst_path):
             os.remove(dst_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to uninstall font '{src_path}': {str(e)}") from e
 
-        # Notify running programs
-        user32.SendMessageTimeoutW(
-            HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 1000, None
-        )
-    except Exception:
-        return False, traceback.format_exc()
-    return True, ""
+
+def _notify_font_change() -> None:
+    """
+    Send a notification to all running programs that fonts have changed.
+    This should be called once after all font operations are complete.
+    """
+    if not is_windows():
+        return
+
+    # Import Windows-specific modules only when needed
+    user32 = ctypes.WinDLL("user32", use_last_error=True)  # type: ignore[attr-defined]
+
+    logger.debug("Notifying running programs of font changes")
+    user32.SendMessageTimeoutW(HWND_BROADCAST, WM_FONTCHANGE, 0, 0, SMTO_ABORTIFHUNG, 1000, None)
 
 
 def _install_fonts(session_dir: str, scene_file_path: str) -> None:
@@ -278,16 +338,24 @@ def _install_fonts(session_dir: str, scene_file_path: str) -> None:
     :param session_dir: directory of the session
     :param scene_file_path: path to the scene file to use for finding fonts
     """
+    if not is_windows():
+        logger.info("Font installation is only supported on Windows, skipping...")
+        return
+
     logger.info("Looking for fonts to install...")
     fonts = find_fonts(session_dir, scene_file_path)
 
     if not fonts:
         raise RuntimeError("No custom fonts found")
+
+    # Install all fonts first
     for font in fonts:
         logger.info("Installing font: " + font)
-        installed, msg = install_font(font)
-        if not installed:
-            raise RuntimeError(f"Error installing font: {msg}")
+        install_font(font)  # Now raises RuntimeError directly on failure
+
+    # Send a single notification after all fonts are installed
+    _notify_font_change()
+    logger.info(f"Successfully installed {len(fonts)} fonts and notified running programs")
 
 
 def _remove_fonts(session_dir: str, scene_file_path: str) -> None:
@@ -297,6 +365,10 @@ def _remove_fonts(session_dir: str, scene_file_path: str) -> None:
     :param session_dir: directory of the session
     :param scene_file_path: path to the scene file to use for finding fonts
     """
+    if not is_windows():
+        logger.info("Font uninstallation is only supported on Windows, skipping...")
+        return
+
     logger.info("Looking for fonts to uninstall...")
     fonts = find_fonts(session_dir, scene_file_path)
 
@@ -304,12 +376,27 @@ def _remove_fonts(session_dir: str, scene_file_path: str) -> None:
         logger.info("No custom fonts found, finishing task...")
         return
 
+    # Track successful uninstalls for notification
+    fonts_uninstalled = 0
+
+    # Uninstall all fonts first
     for font in fonts:
         logger.info("Uninstalling font: " + font)
-        removed, msg = uninstall_font(font)
-        if not removed:
+        try:
+            uninstall_font(font)  # Now raises RuntimeError directly on failure
+            fonts_uninstalled += 1
+        except RuntimeError as e:
             # Don't fail task if font didn't get uninstalled
-            logger.error(f"Error uninstalling font: {msg}")
+            logger.error(f"Error uninstalling font: {e}")
+
+    # Send a single notification after all font operations are complete
+    if fonts_uninstalled > 0:
+        _notify_font_change()
+        logger.info(
+            f"Successfully uninstalled {fonts_uninstalled} fonts and notified running programs"
+        )
+    else:
+        logger.warning("No fonts were uninstalled")
 
 
 def setup_logger() -> None:
