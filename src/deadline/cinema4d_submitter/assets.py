@@ -9,6 +9,7 @@ import c4d
 from .platform_utils import is_windows
 from .scene import Scene
 from .font_utils import is_asset_a_font, copy_font_to_scene_folder, FONTS_DIR
+from .warning_collector import warning_collector
 
 _FRAME_RE = re.compile("#+")
 
@@ -22,6 +23,9 @@ class AssetIntrospector:
         Returns:
             set[Path]: A set containing filepaths of assets needed for Rendering
         """
+        # Clear any previous warnings before processing
+        warning_collector.clear_warnings()
+
         # Grab tx files (if we need to)
         assets: set[Path] = set()
 
