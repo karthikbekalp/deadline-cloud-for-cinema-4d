@@ -97,6 +97,7 @@ steps:
     variables:
       # Turn off buffering in Python
       PYTHONUNBUFFERED: "1"
+      SUBMITTER_INTEGRATION_VERSION: "{{Param.SubmitterIntegrationVersion}}"
     script:
       embeddedFiles:
       - name: initData

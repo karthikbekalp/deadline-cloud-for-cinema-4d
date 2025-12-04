@@ -207,6 +207,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -275,6 +276,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -340,6 +342,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -405,6 +408,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -470,6 +474,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -535,6 +540,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -600,6 +606,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -665,6 +672,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -730,6 +738,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -795,6 +804,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -860,6 +870,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -925,6 +936,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -990,6 +1002,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -1055,6 +1068,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData
@@ -1120,6 +1134,7 @@ steps:
     description: Runs Cinema4D in the background.
     variables:
       PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
     script:
       embeddedFiles:
       - name: initData

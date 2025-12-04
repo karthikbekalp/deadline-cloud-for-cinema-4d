@@ -66,17 +66,13 @@ def _set_cinema4d_log_file() -> None:
     print(f"Cinema 4D detailed logging enabled (g_logfile={log_file_path})")
 
 
-def setup_debug_environment_variables(enabled: str, submitter_integration_version: str = "") -> None:
+def setup_debug_environment_variables(enabled: str) -> None:
     """
     Configure debug environment variables for Cinema 4D detailed logging.
 
     Args:
         enabled: "1" to enable detailed logging, any other value to skip setup
-        submitter_integration_version: The Cinema 4D submitter integration version string
     """
-    if submitter_integration_version:
-        print(f"This job was submitted from deadline-cloud-for-cinema-4d v{submitter_integration_version}")
-
     # Guard clause: exit early if logging is disabled
     if enabled != "1":
         print("Detailed logging is deactivated, skipping setup.")
@@ -89,5 +85,4 @@ def setup_debug_environment_variables(enabled: str, submitter_integration_versio
 
 if __name__ == "__main__":
     enabled = sys.argv[1] if len(sys.argv) > 1 else "0"
-    submitter_integration_version = sys.argv[2] if len(sys.argv) > 2 else ""
-    setup_debug_environment_variables(enabled, submitter_integration_version)
+    setup_debug_environment_variables(enabled)
