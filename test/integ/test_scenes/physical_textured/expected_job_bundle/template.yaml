@@ -20,7 +20,7 @@ parameterDefinitions:
 - name: SubmitterIntegrationVersion
   type: STRING
   userInterface:
-    control: LINE_EDIT
+    control: HIDDEN
     label: Submitter Integration Version
     groupLabel: Cinema4D Settings
   description: The Cinema 4D submitter integration version.
