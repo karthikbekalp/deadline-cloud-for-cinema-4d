@@ -49,6 +49,7 @@ def get_detailed_logging_environment() -> dict[str, Any]:
                     "args": [
                         "{{Env.File.setupLogging}}",
                         "{{Param.DetailedLogging}}",
+                        "{{Param.SubmitterIntegrationVersion}}",
                     ],
                     "cancelation": {"mode": "NOTIFY_THEN_TERMINATE"},
                 },
