@@ -85,6 +85,7 @@ class Cinema4DHandler:
         self.render_kwargs = {}
         self.take = "Main"
         self.map_path = map_path
+        self.has_unmapped_pyro = False
         self.cached_text_was_used_in_previous_frame = False
 
     def _remap_assets(self) -> None:
@@ -140,6 +141,15 @@ class Cinema4DHandler:
                             f"{owner}[{param_id}] = {mapped_path} failed. Error: {f} {traceback.format_exc()}"
                         )
 
+        if self.has_unmapped_pyro:
+            print(
+                "Pyro elements were detected in the scene. If the pyro is not appearing in the "
+                "output, the you can use one of the following approaches to resolve the issue:\n"
+                " * Update the scene assets to use localized paths (Project Asset Inspector => [select all assets] => Asset => Localize Filenames)\n"
+                " * Save the scene using 'Save Project with Assets'\n"
+                " * Submit the scene with the 'Save Cinema 4D project with assets before submission' option"
+            )
+
     def _pathmap_recognized_types(
         self, owner, param_id, node_space, node_path, mapped_path
     ) -> bool:
@@ -194,6 +204,13 @@ class Cinema4DHandler:
             if existing_path:
                 owner[desc_id] = mapped_path
                 mapped = True
+
+        if hasattr(c4d, "Opyro") and owner.GetType() == c4d.Opyro:
+            # Opyro (i.e. Pyro output starting in C4D 2026) actually breaks if you try
+            # to pathmap it, so we will simply return True to indicate that all applicable
+            # pathmapping operations (i.e. none) are complete.
+            self.has_unmapped_pyro = True
+            return True
 
         return mapped
 
