@@ -44,3 +44,11 @@ Follow our step-by-step user guide to start rendering with Deadline Cloud in min
 [Learn about submitter features →](submitter-features.md)
 
 [FAQ and Glossary →](faq-and-glossary.md)
+
+---
+
+## Having Issues?
+
+Running into problems or need help? Check out our support page for troubleshooting tips and how to report issues.
+
+[Get Support →](support.md)
