@@ -56,9 +56,25 @@ body:
         At minimum:
         1. Operating system (e.g. Windows Server 2022; Amazon Linux 2023; etc.)
         2. Version of Cinema 4D
-        3. Version of this package
-        4. If this is from a version installed by the Deadline Cloud Submitter installer, then what version of the submitter installer?
+        3. Copy the entire contents of the About panel (Extensions > AWS Deadline Cloud Submitter > About)
+        4. Renderer used (e.g. Standard, Redshift, Arnold, etc.)
+        5. Fleet configuration (Worker OS, GPU type if using Redshift)
 
         Please share other details about your environment that you think might be relevant to reproducing the bug.
     validations:
       required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Please attach relevant log files. To gather logs:
+        1. Enable "Activate detailed logging" in the submitter's Job-Specific Settings
+        2. Submit your job
+        3. After the job completes (or fails), open Deadline Cloud Monitor
+        4. Navigate to your job
+        5. Click "Download logs" and select "Entire session" to download the full session logs
+      placeholder: Paste log excerpts here or attach log files to this issue.
+    validations:
+      required: false

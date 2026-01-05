@@ -8,18 +8,22 @@ Before reaching out for help, try these troubleshooting steps. They often resolv
 
 ### Troubleshooting Checklist
 
+- **✅ Render one frame locally** - Before submitting to the cloud, render at least one frame locally in Cinema 4D to verify your scene renders correctly. This helps identify scene-specific issues vs. cloud rendering issues.
+
 - **✅ Update to the latest submitter** - We release updates frequently with bug fixes and improvements. Your issue may already be fixed in a newer version. To check if you're running the latest version:
-  1. Find your current version: Open Deadline Cloud Monitor, select any submitted job, and look for **"Submitter Integration Version"** in the job properties panel
+  1. Find your current version: The version is displayed in the submitter window title
   2. Compare with the latest release: Visit the [releases page](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/releases) to see the most recent version
   3. If your version is older, update the submitter and test again before reporting the issue
 
-- **✅ Save Cinema 4D Project with Assets** - Enable the **"Save Cinema 4D Project with Assets"** checkbox in the Job-Specific Settings tab of the submitter. This creates a temporary copy of your project with all assets and fixes file paths, helping identify missing files and organizing assets for render farms. [Learn more about this feature](submitter-features.md#job-specific-settings).
+- **✅ Check your Job-Specific Settings** - Review the Job-Specific Settings tab in the submitter. In particular, enable the **"Save Cinema 4D Project with Assets"** checkbox. This creates a temporary copy of your project with all assets and fixes file paths, helping identify missing files and organizing assets for render farms. [Learn more about this feature](submitter-features.md#job-specific-settings).
 
 - **✅ Try different Cinema 4D versions** - If you're experiencing issues, test with Cinema 4D 2024, 2025, or 2026 to see if the problem is version-specific.
 
-- **✅ Check existing GitHub issues** - Search the [GitHub Issues page](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues) to see if someone else has already reported your problem and found a solution.
+- **✅ Check existing GitHub issues** - Search the [GitHub Issues page](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues?q=is%3Aissue) to see if someone else has already reported your problem and found a solution.
 
 - **✅ Try a different OS fleet** - Submit your job to both Windows and Linux fleets if available. Windows generally has better support and compatibility for Cinema 4D features.
+
+- **✅ Review session logs** - Download and review the session logs from Deadline Cloud Monitor. These logs often contain error messages that generally pinpoint the issue.
 
 - **✅ Create a scene project file** - Use Cinema 4D's **File > Save Project with Assets** to create a self-contained project that includes all dependencies. Zip this file for easy sharing with support.
 
@@ -33,7 +37,7 @@ Contact AWS Support for:
 - AWS account issues
 - Billing questions
 - General AWS service questions
-- Deadline Cloud service availability
+- Deadline Cloud internal server errors in Deadline Cloud Monitor or while using CLI
 
 You can also report Cinema 4D submitter/adaptor issues through AWS Support, but note that these requests may take longer as they need to be routed to the maintainers of this repository. For faster response on Cinema 4D-specific issues, we recommend using GitHub Issues (see below).
 
@@ -57,19 +61,13 @@ You can also report Cinema 4D submitter/adaptor issues through AWS Support, but 
 
 **Before creating a new bug report:**
 
-1. [Search existing bugs](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues?q=is%3Aopen+label%3Abug) to see if your problem has already been reported
+1. [Search existing bugs](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues?q=label%3Abug) to see if your problem has already been reported or fixed in latest versions.
 2. If you find an existing issue that matches your problem:
    - Add a 👍 reaction to help us prioritize
    - Comment with any additional details or reproduction steps you can provide
    - This helps us understand how many users are affected
 
-**If no existing issue matches**, create a new issue with the "bug" label and include:
-
-1. **Clear description** - What happened vs. what you expected
-2. **Steps to reproduce** - Detailed steps so others can recreate the issue
-3. **Environment details** - See the checklist below
-4. **Error messages** - Full error text, not just screenshots
-5. **Logs** - Relevant log files (see below for how to gather them)
+**If no existing issue matches**, [create a new bug report](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues/new?template=bug.yml) using our bug report template. The template will guide you through providing all the necessary information.
 
 ### Feature Requests
 
@@ -97,7 +95,7 @@ When contacting support or creating a GitHub issue, always include:
 
 - **Cinema 4D version** - e.g., Cinema 4D 2025.1.0
 - **Operating System** - e.g., Windows 11, macOS 14.2
-- **Submitter version** - Found in Extensions > AWS Deadline Cloud Submitter > About
+- **Submitter version** - Copy the entire contents of the About panel (Extensions > AWS Deadline Cloud Submitter > About)
 - **Renderer** - Standard, Redshift, Arnold, etc.
 - **Fleet configuration** - Worker OS (Windows/Linux), memory requirements, disk space, GPU type if using Redshift
 - **Error messages** - Complete error text, not paraphrased
@@ -113,10 +111,7 @@ Logs are essential for diagnosing issues. Here's how to collect them:
 3. After the job completes (or fails), retrieve the logs:
    - Open Deadline Cloud Monitor
    - Navigate to your job
-   - Right-click on a task → **View logs**
-   - Enable **"View logs for all tasks"**
-   - Look for the "Shut down DetailedLogging" section
-   - Click **"Download logs"** to save the log files locally for sharing with support
+   - Click **"Download logs"** and select **"Entire session"** to download the full session logs for sharing with support
 
 ### How to Create Scene Project Files
 
