@@ -33,3 +33,25 @@ body:
         you have proposed it.
     validations:
       required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current Workaround
+      description: |
+        How are you currently handling this? Describe any workarounds you're using.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment (optional)
+      description: If relevant to your feature request, please provide your environment details.
+      value: |
+        1. Operating system (e.g. Windows Server 2022; Amazon Linux 2023; etc.)
+        2. Version of Cinema 4D
+        3. Renderer used (e.g. Standard, Redshift, Arnold, etc.)
+        4. Fleet configuration (Worker OS, GPU type if using Redshift)
+    validations:
+      required: false

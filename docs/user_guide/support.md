@@ -21,7 +21,7 @@ Before reaching out for help, try these troubleshooting steps. They often resolv
 
 - **✅ Check existing GitHub issues** - Search the [GitHub Issues page](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues?q=is%3Aissue) to see if someone else has already reported your problem and found a solution.
 
-- **✅ Try a different OS fleet** - Submit your job to both Windows and Linux fleets if available. Windows generally has better support and compatibility for Cinema 4D features.
+- **✅ Try a different fleet operating system** - Submit your job to both Windows and Linux fleets if available. Windows generally has better support and compatibility for Cinema 4D features.
 
 - **✅ Review session logs** - Download and review the session logs from Deadline Cloud Monitor. These logs often contain error messages that generally pinpoint the issue.
 
@@ -79,11 +79,7 @@ You can also report Cinema 4D submitter/adaptor issues through AWS Support, but 
    - Comment with your specific use case - this strengthens the request and helps us understand different needs
    - The more users who express interest, the higher priority it receives
 
-**If no existing request matches**, create a new issue with the "enhancement" label and explain:
-
-1. **What you want** - Clear description of the desired feature
-2. **Why you need it** - Use case and benefits
-3. **Current workaround** - How you're handling it now (if applicable)
+**If no existing request matches**, [create a new feature request](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/issues/new?template=feature_request.yml) using our feature request template. The template will guide you through providing all the necessary information.
 
 **Note:** Feature requests help us prioritize development, but there's no guarantee of implementation timeline.
 
