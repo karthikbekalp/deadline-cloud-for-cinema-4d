@@ -273,6 +273,14 @@ class Cinema4DHandler:
                 self.render_data[c4d.RDATA_MULTIPASS_FILENAME]
             )
 
+        # Apply tile render region if present
+        if "region_left" in data:
+            self.render_data[c4d.RDATA_RENDERREGION] = True
+            self.render_data[c4d.RDATA_RENDERREGION_LEFT] = data["region_left"]
+            self.render_data[c4d.RDATA_RENDERREGION_TOP] = data["region_top"]
+            self.render_data[c4d.RDATA_RENDERREGION_RIGHT] = data["region_right"]
+            self.render_data[c4d.RDATA_RENDERREGION_BOTTOM] = data["region_bottom"]
+
         bm = bitmaps.MultipassBitmap(
             int(self.render_data[c4d.RDATA_XRES]),
             int(self.render_data[c4d.RDATA_YRES]),

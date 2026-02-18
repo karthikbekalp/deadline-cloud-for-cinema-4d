@@ -119,7 +119,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
 
     @property
     def integration_data_interface_version(self) -> SemanticVersion:
-        return SemanticVersion(major=0, minor=3)
+        return SemanticVersion(major=0, minor=4)
 
     @staticmethod
     def _get_timer(timeout: int | float) -> Callable[[], bool]:
@@ -514,7 +514,12 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
             if name in run_data:
                 self._action_queue.enqueue_action(Action(name, {name: run_data[name]}))
 
-        self._action_queue.enqueue_action(Action("start_render", {"frame": run_data["frame"]}))
+        start_render_data = {"frame": run_data["frame"]}
+        for key in ("region_left", "region_top", "region_right", "region_bottom"):
+            if key in run_data:
+                start_render_data[key] = float(run_data[key])
+
+        self._action_queue.enqueue_action(Action("start_render", start_render_data))
 
         while self._cinema4d_is_rendering and not self._has_exception:
             time.sleep(0.1)  # busy wait so that on_cleanup is not called

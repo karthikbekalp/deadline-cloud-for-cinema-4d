@@ -37,6 +37,7 @@ from .scene import Animation, Scene
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
+from .tile_utils import compute_tile_regions, inject_tile_identifier
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
@@ -236,6 +237,32 @@ def _get_job_template(
                 "{{Param." + take_data.frames_parameter_name + "}}"
             )
 
+        # Add tile parameters when tile rendering is enabled
+        enable_tile_rendering = getattr(settings, "enable_tile_rendering", False)
+        if enable_tile_rendering:
+            tiles_x = getattr(settings, "tiles_x", 2)
+            tiles_y = getattr(settings, "tiles_y", 2)
+            tile_regions = compute_tile_regions(tiles_x, tiles_y)
+
+            tile_left_values = " ".join(str(r.left) for r in tile_regions)
+            tile_top_values = " ".join(str(r.top) for r in tile_regions)
+            tile_right_values = " ".join(str(r.right) for r in tile_regions)
+            tile_bottom_values = " ".join(str(r.bottom) for r in tile_regions)
+            tile_col_values = " ".join(str(r.column) for r in tile_regions)
+            tile_row_values = " ".join(str(r.row) for r in tile_regions)
+
+            parameter_space["taskParameterDefinitions"].extend(
+                [
+                    {"name": "TileLeft", "type": "FLOAT", "range": tile_left_values},
+                    {"name": "TileTop", "type": "FLOAT", "range": tile_top_values},
+                    {"name": "TileRight", "type": "FLOAT", "range": tile_right_values},
+                    {"name": "TileBottom", "type": "FLOAT", "range": tile_bottom_values},
+                    {"name": "TileCol", "type": "INT", "range": tile_col_values},
+                    {"name": "TileRow", "type": "INT", "range": tile_row_values},
+                ]
+            )
+            parameter_space["combination"] = "{{Task.Param.Frame}}*{{Task.Param.TileLeft}}"
+
         if adaptor is False:
             variables = step["stepEnvironments"][0]["variables"]
             variables["TAKE"] = take_data.name
@@ -249,6 +276,16 @@ def _get_job_template(
                 take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_data.name)
                 output_path = settings.output_path.replace("$take", take_name_for_path)
                 multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+
+                # Inject tile identifier into output paths when tile rendering is enabled
+                if enable_tile_rendering:
+                    output_path = inject_tile_identifier(
+                        output_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
+                    )
+                    multi_pass_path = inject_tile_identifier(
+                        multi_pass_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
+                    )
+
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '%s'\nmulti_pass_path: '%s'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % (take_data.name, output_path, multi_pass_path)
@@ -258,6 +295,19 @@ def _get_job_template(
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '{{Param.OutputPath}}'\nmulti_pass_path: '{{Param.MultiPassPath}}'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % take_data.name
+                )
+
+            # Update run-data to include tile region references when tile rendering is enabled
+            if enable_tile_rendering:
+                run_data = step["script"]["embeddedFiles"][0]
+                run_data["data"] = (
+                    "frame: {{Task.Param.Frame}}\n"
+                    "region_left: {{Task.Param.TileLeft}}\n"
+                    "region_top: {{Task.Param.TileTop}}\n"
+                    "region_right: {{Task.Param.TileRight}}\n"
+                    "region_bottom: {{Task.Param.TileBottom}}\n"
+                    "tile_col: {{Task.Param.TileCol}}\n"
+                    "tile_row: {{Task.Param.TileRow}}\n"
                 )
 
     # If Arnold is one of the renderers, add Arnold-specific parameters
