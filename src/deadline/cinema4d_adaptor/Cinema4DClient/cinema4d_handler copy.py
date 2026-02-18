@@ -273,55 +273,64 @@ class Cinema4DHandler:
                 self.render_data[c4d.RDATA_MULTIPASS_FILENAME]
             )
 
+        # Always tile render — hardcoded 2x2 for now
+        tiles_x = 2
+        tiles_y = 2
+
         full_w = int(self.render_data[c4d.RDATA_XRES])
         full_h = int(self.render_data[c4d.RDATA_YRES])
+        tile_w = full_w // tiles_x
+        tile_h = full_h // tiles_y
 
-        # Read tile region from data, defaulting to top-left quarter (2x2 grid) for testing
-        # Note: C4D Y-axis is bottom-up, so top=0.5, bottom=1.0 gives the visual top half
-        region_left = int(full_w * data.get("region_left", 0.0))
-        region_top = int(full_h * data.get("region_top", 0.5))
-        region_right = int(full_w * data.get("region_right", 0.5))
-        region_bottom = int(full_h * data.get("region_bottom", 1.0))
-
-        self.render_data[c4d.RDATA_RENDERREGION] = True
-        self.render_data[c4d.RDATA_RENDERREGION_LEFT] = region_left
-        self.render_data[c4d.RDATA_RENDERREGION_TOP] = region_top
-        self.render_data[c4d.RDATA_RENDERREGION_RIGHT] = region_right
-        self.render_data[c4d.RDATA_RENDERREGION_BOTTOM] = region_bottom
-
-        # Full-res bitmap — C4D renders the region into it
-        bm = bitmaps.MultipassBitmap(full_w, full_h, c4d.COLORMODE_RGB)
-        rd = self.render_data.GetDataInstance()
+        output_base = self.render_data[c4d.RDATA_PATH] or ""
 
         self.cached_text_was_used_in_previous_frame = self._cache_text_if_needed(frame_time)
 
-        result = c4d.documents.RenderDocument(
-            self.doc,
-            rd,
-            bm,
-            c4d.RENDERFLAGS_EXTERNAL | c4d.RENDERFLAGS_SHOWERRORS,
-            prog=progress_callback,
-        )
-        result_description = _RENDERRESULT.get(result)
-        if result_description is None:
-            raise RuntimeError("Error: unhandled render result: %s" % result)
-        if result != c4d.RENDERRESULT_OK:
-            raise RuntimeError("Error: render result: %s" % result_description)
+        for ty in range(tiles_y):
+            for tx in range(tiles_x):
+                left = tx * tile_w
+                top_ = ty * tile_h
+                right = left + tile_w
+                bottom = top_ + tile_h
 
-        # Crop the tile region from the full bitmap and save at tile resolution
-        crop_w = region_right - region_left
-        crop_h = region_bottom - region_top
-        tile_bmp = c4d.bitmaps.BaseBitmap()
-        tile_bmp.Init(crop_w, crop_h)
-        for y in range(crop_h):
-            for x in range(crop_w):
-                r, g, b = bm.GetPixel(region_left + x, region_top + y)
-                tile_bmp.SetPixel(x, y, r, g, b)
+                self.render_data[c4d.RDATA_RENDERREGION] = True
+                self.render_data[c4d.RDATA_RENDERREGION_LEFT] = left
+                self.render_data[c4d.RDATA_RENDERREGION_TOP] = top_
+                self.render_data[c4d.RDATA_RENDERREGION_RIGHT] = right
+                self.render_data[c4d.RDATA_RENDERREGION_BOTTOM] = bottom
 
-        output_path = self.render_data[c4d.RDATA_PATH]
-        if output_path:
-            tile_bmp.Save(output_path, c4d.FILTER_PNG)
-            print(f"Saved cropped tile ({crop_w}x{crop_h}) to {output_path}")
+                # Full-res bitmap — C4D renders the region into it
+                bm = bitmaps.MultipassBitmap(full_w, full_h, c4d.COLORMODE_RGB)
+                rd = self.render_data.GetDataInstance()
+
+                print(f"Rendering tile ({tx}, {ty}) region=({left},{top_})-({right},{bottom})")
+                result = c4d.documents.RenderDocument(
+                    self.doc,
+                    rd,
+                    bm,
+                    c4d.RENDERFLAGS_EXTERNAL | c4d.RENDERFLAGS_SHOWERRORS,
+                    prog=progress_callback,
+                )
+                result_description = _RENDERRESULT.get(result)
+                if result_description is None:
+                    raise RuntimeError("Error: unhandled render result: %s" % result)
+                if result != c4d.RENDERRESULT_OK:
+                    raise RuntimeError("Error: render result: %s" % result_description)
+
+                # Crop the tile region from the full bitmap
+                tile_bmp = c4d.bitmaps.BaseBitmap()
+                tile_bmp.Init(tile_w, tile_h)
+                for y in range(tile_h):
+                    for x in range(tile_w):
+                        r, g, b = bm.GetPixel(left + x, top_ + y)
+                        tile_bmp.SetPixel(x, y, r, g, b)
+
+                # Save cropped tile with _tileX_Y suffix
+                if output_base:
+                    base, ext = os.path.splitext(output_base)
+                    tile_path = f"{base}_tile{tx}_{ty}{ext or '.png'}"
+                    tile_bmp.Save(tile_path, c4d.FILTER_PNG)
+                    print(f"Saved tile ({tx},{ty}) ({tile_w}x{tile_h}) to {tile_path}")
 
         print("Finished Rendering")
 

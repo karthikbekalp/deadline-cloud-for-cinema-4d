@@ -2,7 +2,15 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "frame": { "type": "number" }
+      "frame": { "type": "number" },
+      "region_left": { "type": "number" },
+      "region_top": { "type": "number" },
+      "region_right": { "type": "number" },
+      "region_bottom": { "type": "number" },
+      "tile_col": { "type": "number" },
+      "tile_row": { "type": "number" },
+      "tiles_x": { "type": "number" },
+      "tiles_y": { "type": "number" }
     },
     "required":[
       "frame"

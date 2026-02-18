@@ -37,6 +37,7 @@ from .scene import Animation, Scene
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
+from .tile_utils import inject_tile_identifier
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
@@ -236,6 +237,27 @@ def _get_job_template(
                 "{{Param." + take_data.frames_parameter_name + "}}"
             )
 
+        # Add tile parameters when tile rendering is enabled
+        enable_tile_rendering = getattr(settings, "enable_tile_rendering", False)
+        if enable_tile_rendering:
+            tiles_x = getattr(settings, "tiles_x", 2)
+            tiles_y = getattr(settings, "tiles_y", 2)
+
+            parameter_space["taskParameterDefinitions"].extend(
+                [
+                    {
+                        "name": "TileCol",
+                        "type": "INT",
+                        "range": f"0-{tiles_x - 1}" if tiles_x > 1 else "0",
+                    },
+                    {
+                        "name": "TileRow",
+                        "type": "INT",
+                        "range": f"0-{tiles_y - 1}" if tiles_y > 1 else "0",
+                    },
+                ]
+            )
+
         if adaptor is False:
             variables = step["stepEnvironments"][0]["variables"]
             variables["TAKE"] = take_data.name
@@ -249,6 +271,16 @@ def _get_job_template(
                 take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_data.name)
                 output_path = settings.output_path.replace("$take", take_name_for_path)
                 multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+
+                # Inject tile identifier into output paths when tile rendering is enabled
+                if enable_tile_rendering:
+                    output_path = inject_tile_identifier(
+                        output_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
+                    )
+                    multi_pass_path = inject_tile_identifier(
+                        multi_pass_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
+                    )
+
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '%s'\nmulti_pass_path: '%s'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % (take_data.name, output_path, multi_pass_path)
@@ -258,6 +290,17 @@ def _get_job_template(
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '{{Param.OutputPath}}'\nmulti_pass_path: '{{Param.MultiPassPath}}'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % take_data.name
+                )
+
+            # Update run-data to include tile region references when tile rendering is enabled
+            if enable_tile_rendering:
+                run_data = step["script"]["embeddedFiles"][0]
+                run_data["data"] = (
+                    "frame: {{Task.Param.Frame}}\n"
+                    "tile_col: {{Task.Param.TileCol}}\n"
+                    "tile_row: {{Task.Param.TileRow}}\n"
+                    f"tiles_x: {tiles_x}\n"
+                    f"tiles_y: {tiles_y}\n"
                 )
 
     # If Arnold is one of the renderers, add Arnold-specific parameters

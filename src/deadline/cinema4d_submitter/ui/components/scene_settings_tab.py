@@ -14,6 +14,7 @@ from qtpy.QtWidgets import (  # type: ignore
     QPushButton,
     QSizePolicy,
     QSpacerItem,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -185,6 +186,30 @@ class SceneSettingsWidget(QWidget):
         lyt.addWidget(rendering_options_box, widget_row, 0, 1, 2)
         widget_row += 1
 
+        # Tile Rendering group box
+        tile_group_box = QGroupBox("Tile Rendering", self)
+        tile_layout = QGridLayout(tile_group_box)
+
+        self.tile_rendering_chck = QCheckBox("Enable Tile Rendering", self)
+        tile_layout.addWidget(self.tile_rendering_chck, 0, 0, 1, 2)
+
+        tile_layout.addWidget(QLabel("X Tiles (Columns)"), 1, 0)
+        self.tiles_x_spin = QSpinBox(self)
+        self.tiles_x_spin.setMinimum(1)
+        self.tiles_x_spin.setValue(2)
+        tile_layout.addWidget(self.tiles_x_spin, 1, 1)
+
+        tile_layout.addWidget(QLabel("Y Tiles (Rows)"), 2, 0)
+        self.tiles_y_spin = QSpinBox(self)
+        self.tiles_y_spin.setMinimum(1)
+        self.tiles_y_spin.setValue(2)
+        tile_layout.addWidget(self.tiles_y_spin, 2, 1)
+
+        self.tile_rendering_chck.stateChanged.connect(self.activate_tile_rendering_changed)
+
+        lyt.addWidget(tile_group_box, widget_row, 0, 1, 2)
+        widget_row += 1
+
         if self.developer_options:
             self.include_adaptor_wheels = QCheckBox(
                 "Developer Option: Include Adaptor Wheels", self
@@ -213,6 +238,12 @@ class SceneSettingsWidget(QWidget):
             self.layers_box.setCurrentIndex(index)
 
         self.export_job_bundle_chck.setChecked(settings.export_job_bundle_to_temp)
+
+        self.tile_rendering_chck.setChecked(settings.enable_tile_rendering)
+        self.tiles_x_spin.setValue(settings.tiles_x)
+        self.tiles_y_spin.setValue(settings.tiles_y)
+        self.tiles_x_spin.setEnabled(settings.enable_tile_rendering)
+        self.tiles_y_spin.setEnabled(settings.enable_tile_rendering)
 
         if self.developer_options:
             self.include_adaptor_wheels.setChecked(settings.include_adaptor_wheels)
@@ -250,6 +281,10 @@ class SceneSettingsWidget(QWidget):
 
         settings.export_job_bundle_to_temp = self.export_job_bundle_chck.isChecked()
 
+        settings.enable_tile_rendering = self.tile_rendering_chck.isChecked()
+        settings.tiles_x = self.tiles_x_spin.value()
+        settings.tiles_y = self.tiles_y_spin.value()
+
         if self.developer_options:
             settings.include_adaptor_wheels = self.include_adaptor_wheels.isChecked()
         else:
@@ -266,3 +301,8 @@ class SceneSettingsWidget(QWidget):
 
     def activate_multi_path_changed(self, state):
         self.op_multi_path_txt.setEnabled(Qt.CheckState(state) == Qt.Checked)
+
+    def activate_tile_rendering_changed(self, state):
+        enabled = Qt.CheckState(state) == Qt.Checked
+        self.tiles_x_spin.setEnabled(enabled)
+        self.tiles_y_spin.setEnabled(enabled)
