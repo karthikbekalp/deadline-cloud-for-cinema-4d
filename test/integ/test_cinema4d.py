@@ -27,6 +27,7 @@ import pytest
         "redshift_textured",
         "redshift_textured_with_nonascii_characters",
         "physical_multi_takes",
+        "physical_tile_rendering",
     ],
 )
 def test_integ(
