@@ -277,6 +277,7 @@ class Cinema4DHandler:
         # Tile data arrives as grid coordinates (column, row, tiles_x, tiles_y).
         # We compute the normalized region and convert to pixel coordinates.
         is_tile_render = "tiles_x" in data
+        tile_output_path = ""
         if is_tile_render:
             tiles_x = int(data["tiles_x"])
             tiles_y = int(data["tiles_y"])
@@ -298,6 +299,11 @@ class Cinema4DHandler:
             self.render_data[c4d.RDATA_RENDERREGION_TOP] = region_top
             self.render_data[c4d.RDATA_RENDERREGION_RIGHT] = region_right
             self.render_data[c4d.RDATA_RENDERREGION_BOTTOM] = region_bottom
+
+            # Use the output path from render_kwargs (set by the output_path action)
+            # since RDATA_PATH may have been cleared by a previous tile render.
+            tile_output_path = self.render_kwargs.get(OUTPUT_PATH_KEY, "") or self.render_data[c4d.RDATA_PATH] or ""
+            self.render_data[c4d.RDATA_PATH] = ""
 
         bm = bitmaps.MultipassBitmap(
             int(self.render_data[c4d.RDATA_XRES]),
@@ -330,10 +336,38 @@ class Cinema4DHandler:
                     r, g, b = bm.GetPixel(region_left + x, region_top + y)
                     tile_bmp.SetPixel(x, y, r, g, b)
 
-            output_path = self.render_data[c4d.RDATA_PATH]
+            output_path = tile_output_path
             if output_path:
-                tile_bmp.Save(output_path, c4d.FILTER_PNG)
-                print(f"Saved cropped tile ({tile_w}x{tile_h}) to {output_path}")
+                # Ensure the output directory exists
+                output_dir = os.path.dirname(output_path)
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+
+                # Determine file extension from render format setting
+                format_id = self.render_data[c4d.RDATA_FORMAT]
+                format_map = {
+                    c4d.FILTER_PNG: (".png", c4d.FILTER_PNG),
+                    c4d.FILTER_JPG: (".jpg", c4d.FILTER_JPG),
+                    c4d.FILTER_TIF: (".tif", c4d.FILTER_TIF),
+                    c4d.FILTER_BMP: (".bmp", c4d.FILTER_BMP),
+                    c4d.FILTER_EXR: (".exr", c4d.FILTER_EXR),
+                    c4d.FILTER_HDR: (".hdr", c4d.FILTER_HDR),
+                    c4d.FILTER_PSD: (".psd", c4d.FILTER_PSD),
+                    c4d.FILTER_TGA: (".tga", c4d.FILTER_TGA),
+                }
+                ext, save_filter = format_map.get(format_id, (".png", c4d.FILTER_PNG))
+
+                base, existing_ext = os.path.splitext(output_path)
+                if not existing_ext:
+                    tile_path = f"{base}_tile_{tile_col}_{tile_row}{ext}"
+                else:
+                    tile_path = f"{base}_tile_{tile_col}_{tile_row}{existing_ext}"
+                    # Try to match existing extension to a filter
+                    ext_to_filter = {v[0]: v[1] for v in format_map.values()}
+                    save_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
+
+                tile_bmp.Save(tile_path, save_filter)
+                print(f"Saved cropped tile ({tile_w}x{tile_h}) to {tile_path}")
 
         print("Finished Rendering")
 
