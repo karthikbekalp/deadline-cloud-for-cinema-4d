@@ -522,6 +522,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
         # Dispatch either tile assembly or render
         if run_data.get("assemble_tiles"):
             assemble_data = {
+                "frame": run_data["frame"],
                 "tiles_x": int(run_data["tiles_x"]),
                 "tiles_y": int(run_data["tiles_y"]),
                 "output_path": run_data.get("output_path", ""),

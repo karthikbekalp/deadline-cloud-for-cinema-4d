@@ -361,9 +361,9 @@ class Cinema4DHandler:
 
                 base, existing_ext = os.path.splitext(output_path)
                 if not existing_ext:
-                    tile_path = f"{base}_tile_{tile_col}_{tile_row}{ext}"
+                    tile_path = f"{base}_{frame}_tile_{tile_col}_{tile_row}{ext}"
                 else:
-                    tile_path = f"{base}_tile_{tile_col}_{tile_row}{existing_ext}"
+                    tile_path = f"{base}_{frame}_tile_{tile_col}_{tile_row}{existing_ext}"
                     # Try to match existing extension to a filter
                     ext_to_filter = {v[0]: v[1] for v in format_map.values()}
                     save_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
@@ -377,6 +377,7 @@ class Cinema4DHandler:
         """Assemble tile images into a single full-resolution image using C4D's BaseBitmap."""
         tiles_x = int(data["tiles_x"])
         tiles_y = int(data["tiles_y"])
+        frame = int(data["frame"])
         output_path = data.get("output_path", "")
 
         if not output_path:
@@ -404,7 +405,7 @@ class Cinema4DHandler:
             existing_ext = ext
 
         # Load the first tile to determine tile dimensions
-        first_tile_path = f"{base}_tile_0_0{existing_ext}"
+        first_tile_path = f"{base}_{frame}_tile_0_0{existing_ext}"
         first_tile = c4d.bitmaps.BaseBitmap()
         result = first_tile.InitWith(first_tile_path)
         if result[0] != c4d.IMAGERESULT_OK:
@@ -421,7 +422,7 @@ class Cinema4DHandler:
 
         for row in range(tiles_y):
             for col in range(tiles_x):
-                tile_path = f"{base}_tile_{col}_{row}{existing_ext}"
+                tile_path = f"{base}_{frame}_tile_{col}_{row}{existing_ext}"
                 tile_bmp = c4d.bitmaps.BaseBitmap()
                 load_result = tile_bmp.InitWith(tile_path)
                 if load_result[0] != c4d.IMAGERESULT_OK:
@@ -438,7 +439,7 @@ class Cinema4DHandler:
                 print(f"Assembled tile ({col}, {row}) from {tile_path}")
 
         # Save the assembled image
-        final_path = f"{base}{existing_ext}"
+        final_path = f"{base}_{frame}{existing_ext}"
         output_dir = os.path.dirname(final_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
