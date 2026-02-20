@@ -12,27 +12,23 @@ class TestComputeTileRegions:
         assert len(regions) == 1
         r = regions[0]
         assert r.column == 0 and r.row == 0
-        assert r.left == 0.0 and r.top == 0.0
-        assert r.right == 1.0 and r.bottom == 1.0
 
     def test_2x2_grid(self):
         regions = compute_tile_regions(2, 2)
         assert len(regions) == 4
         # Row-major order: (0,0), (1,0), (0,1), (1,1)
-        assert regions[0] == TileRegion(0, 0, 0.0, 0.0, 0.5, 0.5)
-        assert regions[1] == TileRegion(1, 0, 0.5, 0.0, 1.0, 0.5)
-        assert regions[2] == TileRegion(0, 1, 0.0, 0.5, 0.5, 1.0)
-        assert regions[3] == TileRegion(1, 1, 0.5, 0.5, 1.0, 1.0)
+        assert regions[0] == TileRegion(0, 0)
+        assert regions[1] == TileRegion(1, 0)
+        assert regions[2] == TileRegion(0, 1)
+        assert regions[3] == TileRegion(1, 1)
 
     def test_3x1_grid(self):
         regions = compute_tile_regions(3, 1)
         assert len(regions) == 3
-        assert pytest.approx(regions[0].left) == 0.0
-        assert pytest.approx(regions[0].right) == 1 / 3
-        assert pytest.approx(regions[1].left) == 1 / 3
-        assert pytest.approx(regions[1].right) == 2 / 3
-        assert pytest.approx(regions[2].left) == 2 / 3
-        assert pytest.approx(regions[2].right) == 1.0
+        assert regions[0].column == 0
+        assert regions[1].column == 1
+        assert regions[2].column == 2
+        assert all(r.row == 0 for r in regions)
 
     def test_invalid_tiles_x(self):
         with pytest.raises(ValueError):

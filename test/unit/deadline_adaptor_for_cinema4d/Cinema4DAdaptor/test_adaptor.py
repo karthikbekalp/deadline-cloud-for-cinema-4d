@@ -35,10 +35,10 @@ REFERENCE_RUN_DATA_SCHEMA = {
     "type": "object",
     "properties": {
         "frame": {"type": "number"},
-        "region_left": {"type": "number"},
-        "region_top": {"type": "number"},
-        "region_right": {"type": "number"},
-        "region_bottom": {"type": "number"},
+        "tile_column": {"type": "integer"},
+        "tile_row": {"type": "integer"},
+        "tiles_x": {"type": "integer"},
+        "tiles_y": {"type": "integer"},
     },
     "required": ["frame"],
 }

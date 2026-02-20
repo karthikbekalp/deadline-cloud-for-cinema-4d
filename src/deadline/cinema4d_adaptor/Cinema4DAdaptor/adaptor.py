@@ -515,9 +515,9 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 self._action_queue.enqueue_action(Action(name, {name: run_data[name]}))
 
         start_render_data = {"frame": run_data["frame"]}
-        for key in ("region_left", "region_top", "region_right", "region_bottom"):
+        for key in ("tile_column", "tile_row", "tiles_x", "tiles_y"):
             if key in run_data:
-                start_render_data[key] = float(run_data[key])
+                start_render_data[key] = int(run_data[key])
 
         self._action_queue.enqueue_action(Action("start_render", start_render_data))
 

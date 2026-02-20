@@ -92,25 +92,13 @@ steps:
     - name: Frame
       type: INT
       range: '{{Param.Frames}}'
-    - name: TileLeft
-      type: FLOAT
-      range: 0.0 0.5 0.0 0.5
-    - name: TileTop
-      type: FLOAT
-      range: 0.0 0.0 0.5 0.5
-    - name: TileRight
-      type: FLOAT
-      range: 0.5 1.0 0.5 1.0
-    - name: TileBottom
-      type: FLOAT
-      range: 0.5 0.5 1.0 1.0
     - name: TileCol
       type: INT
-      range: 0 1 0 1
+      range: 0-1
     - name: TileRow
       type: INT
-      range: 0 0 1 1
-    combination: '{{Task.Param.Frame}}*{{Task.Param.TileLeft}}'
+      range: 0-1
+    combination: Frame * TileCol * TileRow
   stepEnvironments:
   - name: Cinema4D
     description: Runs Cinema4D in the background.
@@ -161,12 +149,10 @@ steps:
       type: TEXT
       data: |
         frame: {{Task.Param.Frame}}
-        region_left: {{Task.Param.TileLeft}}
-        region_top: {{Task.Param.TileTop}}
-        region_right: {{Task.Param.TileRight}}
-        region_bottom: {{Task.Param.TileBottom}}
-        tile_col: {{Task.Param.TileCol}}
+        tile_column: {{Task.Param.TileCol}}
         tile_row: {{Task.Param.TileRow}}
+        tiles_x: 2
+        tiles_y: 2
     actions:
       onRun:
         command: cinema4d-openjd

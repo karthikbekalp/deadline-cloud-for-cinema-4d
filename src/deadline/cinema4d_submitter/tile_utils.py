@@ -6,21 +6,16 @@ from dataclasses import dataclass
 
 @dataclass
 class TileRegion:
-    """A rectangular sub-region of a frame defined by normalized coordinates (0.0–1.0)."""
+    """A tile position in a grid defined by column and row indices."""
 
     column: int
     row: int
-    left: float
-    top: float
-    right: float
-    bottom: float
 
 
 def compute_tile_regions(tiles_x: int, tiles_y: int) -> list[TileRegion]:
     """
     Compute tile regions for a grid of tiles_x columns and tiles_y rows.
 
-    Each boundary is a normalized float in [0.0, 1.0].
     Returns tiles_x * tiles_y TileRegion objects, ordered row-major
     (row 0 col 0, row 0 col 1, ..., row 1 col 0, ...).
 
@@ -39,10 +34,6 @@ def compute_tile_regions(tiles_x: int, tiles_y: int) -> list[TileRegion]:
                 TileRegion(
                     column=col,
                     row=row,
-                    left=col / tiles_x,
-                    top=row / tiles_y,
-                    right=(col + 1) / tiles_x,
-                    bottom=(row + 1) / tiles_y,
                 )
             )
     return regions

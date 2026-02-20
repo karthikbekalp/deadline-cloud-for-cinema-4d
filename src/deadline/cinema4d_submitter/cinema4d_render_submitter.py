@@ -37,7 +37,7 @@ from .scene import Animation, Scene
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
-from .tile_utils import compute_tile_regions, inject_tile_identifier
+from .tile_utils import inject_tile_identifier
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
@@ -242,26 +242,22 @@ def _get_job_template(
         if enable_tile_rendering:
             tiles_x = getattr(settings, "tiles_x", 2)
             tiles_y = getattr(settings, "tiles_y", 2)
-            tile_regions = compute_tile_regions(tiles_x, tiles_y)
-
-            tile_left_values = " ".join(str(r.left) for r in tile_regions)
-            tile_top_values = " ".join(str(r.top) for r in tile_regions)
-            tile_right_values = " ".join(str(r.right) for r in tile_regions)
-            tile_bottom_values = " ".join(str(r.bottom) for r in tile_regions)
-            tile_col_values = " ".join(str(r.column) for r in tile_regions)
-            tile_row_values = " ".join(str(r.row) for r in tile_regions)
 
             parameter_space["taskParameterDefinitions"].extend(
                 [
-                    {"name": "TileLeft", "type": "FLOAT", "range": tile_left_values},
-                    {"name": "TileTop", "type": "FLOAT", "range": tile_top_values},
-                    {"name": "TileRight", "type": "FLOAT", "range": tile_right_values},
-                    {"name": "TileBottom", "type": "FLOAT", "range": tile_bottom_values},
-                    {"name": "TileCol", "type": "INT", "range": tile_col_values},
-                    {"name": "TileRow", "type": "INT", "range": tile_row_values},
+                    {
+                        "name": "TileCol",
+                        "type": "INT",
+                        "range": "0-%d" % (tiles_x - 1),
+                    },
+                    {
+                        "name": "TileRow",
+                        "type": "INT",
+                        "range": "0-%d" % (tiles_y - 1),
+                    },
                 ]
             )
-            parameter_space["combination"] = "{{Task.Param.Frame}}*{{Task.Param.TileLeft}}"
+            parameter_space["combination"] = "Frame * TileCol * TileRow"
 
         if adaptor is False:
             variables = step["stepEnvironments"][0]["variables"]
@@ -302,12 +298,11 @@ def _get_job_template(
                 run_data = step["script"]["embeddedFiles"][0]
                 run_data["data"] = (
                     "frame: {{Task.Param.Frame}}\n"
-                    "region_left: {{Task.Param.TileLeft}}\n"
-                    "region_top: {{Task.Param.TileTop}}\n"
-                    "region_right: {{Task.Param.TileRight}}\n"
-                    "region_bottom: {{Task.Param.TileBottom}}\n"
-                    "tile_col: {{Task.Param.TileCol}}\n"
+                    "tile_column: {{Task.Param.TileCol}}\n"
                     "tile_row: {{Task.Param.TileRow}}\n"
+                    "tiles_x: %d\n"
+                    "tiles_y: %d\n"
+                    % (tiles_x, tiles_y)
                 )
 
     # If Arnold is one of the renderers, add Arnold-specific parameters
