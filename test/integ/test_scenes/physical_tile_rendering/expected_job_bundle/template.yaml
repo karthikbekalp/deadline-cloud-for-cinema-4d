@@ -94,10 +94,10 @@ steps:
       range: '{{Param.Frames}}'
     - name: TileCol
       type: INT
-      range: 0-1
+      range: 0-9
     - name: TileRow
       type: INT
-      range: 0-1
+      range: 0-9
     combination: Frame * TileCol * TileRow
   stepEnvironments:
   - name: Cinema4D
@@ -151,8 +151,8 @@ steps:
         frame: {{Task.Param.Frame}}
         tile_column: {{Task.Param.TileCol}}
         tile_row: {{Task.Param.TileRow}}
-        tiles_x: 2
-        tiles_y: 2
+        tiles_x: 10
+        tiles_y: 10
     actions:
       onRun:
         command: cinema4d-openjd
@@ -225,8 +225,8 @@ steps:
       data: |
         frame: {{Task.Param.Frame}}
         assemble_tiles: 'true'
-        tiles_x: 2
-        tiles_y: 2
+        tiles_x: 10
+        tiles_y: 10
         output_path: '{{Param.OutputPath}}'
     actions:
       onRun:

@@ -16,7 +16,7 @@ def main():
     render_data = doc.GetActiveRenderData()
     render_data[c4d.RDATA_PATH] = "renders/$prj"
     frame_start = c4d.BaseTime(1, doc.GetFps())
-    frame_end = c4d.BaseTime(1, doc.GetFps())
+    frame_end = c4d.BaseTime(3, doc.GetFps())
     render_data[c4d.RDATA_FRAMEFROM] = frame_start
     render_data[c4d.RDATA_FRAMETO] = frame_end
     render_data[c4d.RDATA_RENDERENGINE] = 1023342  # physical
@@ -32,7 +32,7 @@ def main():
 
     c4d.EventAdd()
 
-    internal_create_job_bundle(save_dir, enable_tile_rendering=True, tiles_x=2, tiles_y=2)
+    internal_create_job_bundle(save_dir, enable_tile_rendering=True, tiles_x=10, tiles_y=10)
 
 
 if __name__ == "__main__":

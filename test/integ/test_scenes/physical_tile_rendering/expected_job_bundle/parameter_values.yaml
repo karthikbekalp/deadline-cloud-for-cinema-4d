@@ -14,7 +14,7 @@ parameterValues:
 - name: UseCachedText
   value: '0'
 - name: Frames
-  value: '1'
+  value: 1-3
 - name: CondaPackages
   value: cinema4d=2026.* cinema4d-openjd=0.8.*
 - name: CondaChannels
