@@ -39,6 +39,8 @@ REFERENCE_RUN_DATA_SCHEMA = {
         "tile_row": {"type": "integer"},
         "tiles_x": {"type": "integer"},
         "tiles_y": {"type": "integer"},
+        "assemble_tiles": {"type": "string"},
+        "output_path": {"type": "string"},
     },
     "required": ["frame"],
 }

@@ -519,7 +519,16 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
             if key in run_data:
                 start_render_data[key] = int(run_data[key])
 
-        self._action_queue.enqueue_action(Action("start_render", start_render_data))
+        # Dispatch either tile assembly or render
+        if run_data.get("assemble_tiles"):
+            assemble_data = {
+                "tiles_x": int(run_data["tiles_x"]),
+                "tiles_y": int(run_data["tiles_y"]),
+                "output_path": run_data.get("output_path", ""),
+            }
+            self._action_queue.enqueue_action(Action("assemble_tiles", assemble_data))
+        else:
+            self._action_queue.enqueue_action(Action("start_render", start_render_data))
 
         while self._cinema4d_is_rendering and not self._has_exception:
             time.sleep(0.1)  # busy wait so that on_cleanup is not called

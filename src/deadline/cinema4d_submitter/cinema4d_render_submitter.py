@@ -305,6 +305,43 @@ def _get_job_template(
                     % (tiles_x, tiles_y)
                 )
 
+    # Add tile assembly steps (one per render step) when tile rendering is enabled
+    if getattr(settings, "enable_tile_rendering", False) and adaptor:
+        tiles_x = getattr(settings, "tiles_x", 2)
+        tiles_y = getattr(settings, "tiles_y", 2)
+        render_step_names = [s["name"] for s in job_template["steps"]]
+
+        for render_step in list(job_template["steps"]):
+            assembly_step = {
+                "name": f"{render_step['name']} - Assemble Tiles",
+                "dependsOn": [{"dependsOn": render_step["name"]}],
+                "parameterSpace": {
+                    "taskParameterDefinitions": [
+                        deepcopy(render_step["parameterSpace"]["taskParameterDefinitions"][0])
+                    ]
+                },
+                "stepEnvironments": deepcopy(render_step["stepEnvironments"]),
+                "script": {
+                    "embeddedFiles": [
+                        {
+                            "name": "runData",
+                            "filename": "run-data.yaml",
+                            "type": "TEXT",
+                            "data": (
+                                "frame: {{Task.Param.Frame}}\n"
+                                "assemble_tiles: 'true'\n"
+                                "tiles_x: %d\n"
+                                "tiles_y: %d\n"
+                                "output_path: '{{Param.OutputPath}}'\n"
+                                % (tiles_x, tiles_y)
+                            ),
+                        }
+                    ],
+                    "actions": deepcopy(render_step["script"]["actions"]),
+                },
+            }
+            job_template["steps"].append(assembly_step)
+
     # If Arnold is one of the renderers, add Arnold-specific parameters
     if "arnold" in renderers:
         job_template["parameterDefinitions"].append(

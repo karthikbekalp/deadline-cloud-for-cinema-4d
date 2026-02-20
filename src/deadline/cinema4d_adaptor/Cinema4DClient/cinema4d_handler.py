@@ -31,6 +31,7 @@ OUTPUT_PATH_KEY = "output_path"
 MULTIPASS_PATH_KEY = "multi_pass_path"
 SCENE_FILE_KEY = "scene_file"
 START_RENDER_KEY = "start_render"
+ASSEMBLE_TILES_KEY = "assemble_tiles"
 TAKE_KEY = "take"
 
 
@@ -78,6 +79,7 @@ class Cinema4DHandler:
             TAKE_KEY: self.set_take,
             FRAME_KEY: self.set_frame,
             START_RENDER_KEY: self.start_render,
+            ASSEMBLE_TILES_KEY: self.assemble_tiles,
             OUTPUT_PATH_KEY: self.output_path,
             MULTIPASS_PATH_KEY: self.multi_pass_path,
             USE_CACHED_TEXT_KEY: self.use_cached_text,
@@ -370,6 +372,80 @@ class Cinema4DHandler:
                 print(f"Saved cropped tile ({tile_w}x{tile_h}) to {tile_path}")
 
         print("Finished Rendering")
+
+    def assemble_tiles(self, data: dict) -> None:
+        """Assemble tile images into a single full-resolution image using C4D's BaseBitmap."""
+        tiles_x = int(data["tiles_x"])
+        tiles_y = int(data["tiles_y"])
+        output_path = data.get("output_path", "")
+
+        if not output_path:
+            raise RuntimeError("assemble_tiles: no output_path provided")
+
+        output_path = self.map_path(output_path)
+
+        # Determine extension and save filter from render format
+        format_id = self.render_data[c4d.RDATA_FORMAT] if self.render_data else 0
+        format_map = {
+            c4d.FILTER_PNG: (".png", c4d.FILTER_PNG),
+            c4d.FILTER_JPG: (".jpg", c4d.FILTER_JPG),
+            c4d.FILTER_TIF: (".tif", c4d.FILTER_TIF),
+            c4d.FILTER_BMP: (".bmp", c4d.FILTER_BMP),
+            c4d.FILTER_EXR: (".exr", c4d.FILTER_EXR),
+            c4d.FILTER_HDR: (".hdr", c4d.FILTER_HDR),
+            c4d.FILTER_PSD: (".psd", c4d.FILTER_PSD),
+            c4d.FILTER_TGA: (".tga", c4d.FILTER_TGA),
+        }
+        ext, save_filter = format_map.get(format_id, (".png", c4d.FILTER_PNG))
+
+        base, existing_ext = os.path.splitext(output_path)
+        if not existing_ext:
+            existing_ext = ext
+
+        # Load the first tile to determine tile dimensions
+        first_tile_path = f"{base}_tile_0_0{existing_ext}"
+        first_tile = c4d.bitmaps.BaseBitmap()
+        result = first_tile.InitWith(first_tile_path)
+        if result[0] != c4d.IMAGERESULT_OK:
+            raise RuntimeError(f"assemble_tiles: failed to load first tile: {first_tile_path}")
+
+        tile_w = first_tile.GetBw()
+        tile_h = first_tile.GetBh()
+        full_w = tile_w * tiles_x
+        full_h = tile_h * tiles_y
+
+        # Create the full-resolution output bitmap
+        final_bmp = c4d.bitmaps.BaseBitmap()
+        final_bmp.Init(full_w, full_h)
+
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                tile_path = f"{base}_tile_{col}_{row}{existing_ext}"
+                tile_bmp = c4d.bitmaps.BaseBitmap()
+                load_result = tile_bmp.InitWith(tile_path)
+                if load_result[0] != c4d.IMAGERESULT_OK:
+                    raise RuntimeError(f"assemble_tiles: failed to load tile: {tile_path}")
+
+                # Copy tile pixels into the final bitmap
+                dst_x = col * tile_w
+                dst_y = row * tile_h
+                for y in range(tile_h):
+                    for x in range(tile_w):
+                        r, g, b = tile_bmp.GetPixel(x, y)
+                        final_bmp.SetPixel(dst_x + x, dst_y + y, r, g, b)
+
+                print(f"Assembled tile ({col}, {row}) from {tile_path}")
+
+        # Save the assembled image
+        final_path = f"{base}{existing_ext}"
+        output_dir = os.path.dirname(final_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        ext_to_filter = {v[0]: v[1] for v in format_map.values()}
+        final_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
+        final_bmp.Save(final_path, final_filter)
+        print(f"Assembled {tiles_x * tiles_y} tiles into {final_path} ({full_w}x{full_h})")
 
     def output_path(self, data: dict) -> None:
         output_path = data.get(OUTPUT_PATH_KEY, "")
