@@ -314,7 +314,7 @@ def _get_job_template(
         for render_step in list(job_template["steps"]):
             assembly_step = {
                 "name": f"{render_step['name']} - Assemble Tiles",
-                "dependsOn": [{"dependsOn": render_step["name"]}],
+                "dependencies": [{"dependsOn": render_step["name"]}],
                 "parameterSpace": {
                     "taskParameterDefinitions": [
                         deepcopy(render_step["parameterSpace"]["taskParameterDefinitions"][0])

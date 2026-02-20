@@ -166,3 +166,78 @@ steps:
         cancelation:
           mode: NOTIFY_THEN_TERMINATE
         timeout: 172800
+- name: Main - Assemble Tiles
+  dependencies:
+  - dependsOn: Main
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Frame
+      type: INT
+      range: '{{Param.Frames}}'
+  stepEnvironments:
+  - name: Cinema4D
+    description: Runs Cinema4D in the background.
+    variables:
+      PYTHONUNBUFFERED: '1'
+      SUBMITTER_INTEGRATION_VERSION: '{{Param.SubmitterIntegrationVersion}}'
+    script:
+      embeddedFiles:
+      - name: initData
+        filename: init-data.yaml
+        type: TEXT
+        data: |-
+          scene_file: '{{Param.Cinema4DFile}}'
+          take: 'Main'
+          output_path: '{{Param.OutputPath}}'
+          multi_pass_path: '{{Param.MultiPassPath}}'
+          activate_error_checking: '{{Param.ActivateErrorChecking}}'
+          use_cached_text: '{{Param.UseCachedText}}'
+      actions:
+        onEnter:
+          command: cinema4d-openjd
+          args:
+          - daemon
+          - start
+          - --path-mapping-rules
+          - file://{{Session.PathMappingRulesFile}}
+          - --connection-file
+          - '{{Session.WorkingDirectory}}/connection.json'
+          - --init-data
+          - file://{{Env.File.initData}}
+          cancelation:
+            mode: NOTIFY_THEN_TERMINATE
+          timeout: 600
+        onExit:
+          command: cinema4d-openjd
+          args:
+          - daemon
+          - stop
+          - --connection-file
+          - '{{ Session.WorkingDirectory }}/connection.json'
+          cancelation:
+            mode: NOTIFY_THEN_TERMINATE
+          timeout: 300
+  script:
+    embeddedFiles:
+    - name: runData
+      filename: run-data.yaml
+      type: TEXT
+      data: |
+        frame: {{Task.Param.Frame}}
+        assemble_tiles: 'true'
+        tiles_x: 2
+        tiles_y: 2
+        output_path: '{{Param.OutputPath}}'
+    actions:
+      onRun:
+        command: cinema4d-openjd
+        args:
+        - daemon
+        - run
+        - --connection-file
+        - '{{ Session.WorkingDirectory }}/connection.json'
+        - --run-data
+        - file://{{ Task.File.runData }}
+        cancelation:
+          mode: NOTIFY_THEN_TERMINATE
+        timeout: 172800

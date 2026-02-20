@@ -384,8 +384,9 @@ class Cinema4DHandler:
 
         output_path = self.map_path(output_path)
 
-        # Determine extension and save filter from render format
-        format_id = self.render_data[c4d.RDATA_FORMAT] if self.render_data else 0
+        # Determine extension and save filter from the document's render format
+        render_data = self.doc.GetActiveRenderData()
+        format_id = render_data[c4d.RDATA_FORMAT] if render_data else 0
         format_map = {
             c4d.FILTER_PNG: (".png", c4d.FILTER_PNG),
             c4d.FILTER_JPG: (".jpg", c4d.FILTER_JPG),
@@ -446,6 +447,7 @@ class Cinema4DHandler:
         final_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
         final_bmp.Save(final_path, final_filter)
         print(f"Assembled {tiles_x * tiles_y} tiles into {final_path} ({full_w}x{full_h})")
+        print("Finished Rendering")
 
     def output_path(self, data: dict) -> None:
         output_path = data.get(OUTPUT_PATH_KEY, "")
