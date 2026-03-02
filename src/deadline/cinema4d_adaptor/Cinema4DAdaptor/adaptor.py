@@ -526,6 +526,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 "tiles_x": int(run_data["tiles_x"]),
                 "tiles_y": int(run_data["tiles_y"]),
                 "output_path": run_data.get("output_path", ""),
+                "multi_pass_path": run_data.get("multi_pass_path", ""),
             }
             self._action_queue.enqueue_action(Action("assemble_tiles", assemble_data))
         else:

@@ -37,7 +37,6 @@ from .scene import Animation, Scene
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
-from .tile_utils import inject_tile_identifier
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
@@ -273,14 +272,8 @@ def _get_job_template(
                 output_path = settings.output_path.replace("$take", take_name_for_path)
                 multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
 
-                # Inject tile identifier into output paths when tile rendering is enabled
-                if enable_tile_rendering:
-                    output_path = inject_tile_identifier(
-                        output_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
-                    )
-                    multi_pass_path = inject_tile_identifier(
-                        multi_pass_path, "{{Task.Param.TileCol}}", "{{Task.Param.TileRow}}"
-                    )
+                # Note: tile identifiers are NOT injected into init data paths.
+                # The handler adds tile suffixes when saving cropped tiles.
 
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '%s'\nmulti_pass_path: '%s'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
@@ -309,9 +302,22 @@ def _get_job_template(
     if getattr(settings, "enable_tile_rendering", False) and adaptor:
         tiles_x = getattr(settings, "tiles_x", 2)
         tiles_y = getattr(settings, "tiles_y", 2)
-        render_step_names = [s["name"] for s in job_template["steps"]]
+        render_steps = list(job_template["steps"])
 
-        for render_step in list(job_template["steps"]):
+        for idx, render_step in enumerate(render_steps):
+            # Build assembly step environment — clean copy of render step's environment
+            assembly_env = deepcopy(render_step["stepEnvironments"])
+
+            # When the output path contains $take, resolve it to the actual take
+            # name so the assembly step looks for tiles at the correct path.
+            if has_take_token and idx < len(takes):
+                take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", takes[idx].name)
+                assembly_output_path = settings.output_path.replace("$take", take_name_for_path)
+                assembly_multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+            else:
+                assembly_output_path = "{{Param.OutputPath}}"
+                assembly_multi_pass_path = "{{Param.MultiPassPath}}"
+
             assembly_step = {
                 "name": f"{render_step['name']} - Assemble Tiles",
                 "dependencies": [{"dependsOn": render_step["name"]}],
@@ -320,7 +326,7 @@ def _get_job_template(
                         deepcopy(render_step["parameterSpace"]["taskParameterDefinitions"][0])
                     ]
                 },
-                "stepEnvironments": deepcopy(render_step["stepEnvironments"]),
+                "stepEnvironments": assembly_env,
                 "script": {
                     "embeddedFiles": [
                         {
@@ -332,8 +338,9 @@ def _get_job_template(
                                 "assemble_tiles: 'true'\n"
                                 "tiles_x: %d\n"
                                 "tiles_y: %d\n"
-                                "output_path: '{{Param.OutputPath}}'\n"
-                                % (tiles_x, tiles_y)
+                                "output_path: '%s'\n"
+                                "multi_pass_path: '%s'\n"
+                                % (tiles_x, tiles_y, assembly_output_path, assembly_multi_pass_path)
                             ),
                         }
                     ],

@@ -8,7 +8,8 @@
       "tiles_x": { "type": "integer" },
       "tiles_y": { "type": "integer" },
       "assemble_tiles": { "type": "string" },
-      "output_path": { "type": "string" }
+      "output_path": { "type": "string" },
+      "multi_pass_path": { "type": "string" }
     },
     "required":[
       "frame"

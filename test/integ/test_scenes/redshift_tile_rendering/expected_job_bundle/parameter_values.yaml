@@ -4,7 +4,7 @@ parameterValues:
 - name: SubmitterIntegrationVersion
   value: 0.8.0
 - name: OutputPath
-  value: PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering
+  value: PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_$take
 - name: MultiPassPath
   value: ''
 - name: ActivateErrorChecking
@@ -13,8 +13,10 @@ parameterValues:
   value: '0'
 - name: UseCachedText
   value: '0'
-- name: Frames
+- name: MainFrames
   value: '1'
+- name: AFrames
+  value: '2'
 - name: CondaPackages
   value: cinema4d=2026.* cinema4d-openjd=0.8.*
 - name: CondaChannels
