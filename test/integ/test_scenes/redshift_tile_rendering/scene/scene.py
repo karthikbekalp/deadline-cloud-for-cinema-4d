@@ -25,9 +25,7 @@ def main():
     render_settings_1[c4d.RDATA_FRAMETO] = frame_end
     render_settings_1[c4d.RDATA_RENDERENGINE] = 1036219  # redshift
     render_settings_1[c4d.RDATA_FORMAT] = c4d.FILTER_JPG
-    render_settings_1[c4d.RDATA_MULTIPASS_SAVEIMAGE] = True
-    render_settings_1[c4d.RDATA_MULTIPASS_FILENAME] = "renders/$prj_$take_mp"
-    render_settings_1[c4d.RDATA_MULTIPASS_SAVEFORMAT] = c4d.FILTER_PSD
+    render_settings_1[c4d.RDATA_MULTIPASS_SAVEIMAGE] = False
 
     # Create a second render settings with a different frame range
     render_settings_2 = render_settings_1.GetClone()
