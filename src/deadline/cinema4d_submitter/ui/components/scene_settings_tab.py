@@ -193,17 +193,17 @@ class SceneSettingsWidget(QWidget):
         self.tile_rendering_chck = QCheckBox("Enable Tile Rendering", self)
         tile_layout.addWidget(self.tile_rendering_chck, 0, 0, 1, 2)
 
-        tile_layout.addWidget(QLabel("X Tiles (Columns)"), 1, 0)
-        self.tiles_x_spin = QSpinBox(self)
-        self.tiles_x_spin.setMinimum(1)
-        self.tiles_x_spin.setValue(2)
-        tile_layout.addWidget(self.tiles_x_spin, 1, 1)
+        tile_layout.addWidget(QLabel("Columns"), 1, 0)
+        self.tiles_columns_spin = QSpinBox(self)
+        self.tiles_columns_spin.setMinimum(1)
+        self.tiles_columns_spin.setValue(2)
+        tile_layout.addWidget(self.tiles_columns_spin, 1, 1)
 
-        tile_layout.addWidget(QLabel("Y Tiles (Rows)"), 2, 0)
-        self.tiles_y_spin = QSpinBox(self)
-        self.tiles_y_spin.setMinimum(1)
-        self.tiles_y_spin.setValue(2)
-        tile_layout.addWidget(self.tiles_y_spin, 2, 1)
+        tile_layout.addWidget(QLabel("Rows"), 2, 0)
+        self.tiles_rows_spin = QSpinBox(self)
+        self.tiles_rows_spin.setMinimum(1)
+        self.tiles_rows_spin.setValue(2)
+        tile_layout.addWidget(self.tiles_rows_spin, 2, 1)
 
         self.tile_rendering_chck.stateChanged.connect(self.activate_tile_rendering_changed)
 
@@ -240,10 +240,10 @@ class SceneSettingsWidget(QWidget):
         self.export_job_bundle_chck.setChecked(settings.export_job_bundle_to_temp)
 
         self.tile_rendering_chck.setChecked(settings.enable_tile_rendering)
-        self.tiles_x_spin.setValue(settings.tiles_x)
-        self.tiles_y_spin.setValue(settings.tiles_y)
-        self.tiles_x_spin.setEnabled(settings.enable_tile_rendering)
-        self.tiles_y_spin.setEnabled(settings.enable_tile_rendering)
+        self.tiles_columns_spin.setValue(settings.tiles_columns)
+        self.tiles_rows_spin.setValue(settings.tiles_rows)
+        self.tiles_columns_spin.setEnabled(settings.enable_tile_rendering)
+        self.tiles_rows_spin.setEnabled(settings.enable_tile_rendering)
 
         if self.developer_options:
             self.include_adaptor_wheels.setChecked(settings.include_adaptor_wheels)
@@ -282,8 +282,8 @@ class SceneSettingsWidget(QWidget):
         settings.export_job_bundle_to_temp = self.export_job_bundle_chck.isChecked()
 
         settings.enable_tile_rendering = self.tile_rendering_chck.isChecked()
-        settings.tiles_x = self.tiles_x_spin.value()
-        settings.tiles_y = self.tiles_y_spin.value()
+        settings.tiles_columns = self.tiles_columns_spin.value()
+        settings.tiles_rows = self.tiles_rows_spin.value()
 
         if self.developer_options:
             settings.include_adaptor_wheels = self.include_adaptor_wheels.isChecked()
@@ -304,5 +304,5 @@ class SceneSettingsWidget(QWidget):
 
     def activate_tile_rendering_changed(self, state):
         enabled = Qt.CheckState(state) == Qt.Checked
-        self.tiles_x_spin.setEnabled(enabled)
-        self.tiles_y_spin.setEnabled(enabled)
+        self.tiles_columns_spin.setEnabled(enabled)
+        self.tiles_rows_spin.setEnabled(enabled)

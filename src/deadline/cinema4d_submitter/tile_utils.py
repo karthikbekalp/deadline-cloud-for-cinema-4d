@@ -12,24 +12,24 @@ class TileRegion:
     row: int
 
 
-def compute_tile_regions(tiles_x: int, tiles_y: int) -> list[TileRegion]:
+def compute_tile_regions(tiles_columns: int, tiles_rows: int) -> list[TileRegion]:
     """
-    Compute tile regions for a grid of tiles_x columns and tiles_y rows.
+    Compute tile regions for a grid of tiles_columns columns and tiles_rows rows.
 
-    Returns tiles_x * tiles_y TileRegion objects, ordered row-major
+    Returns tiles_columns * tiles_rows TileRegion objects, ordered row-major
     (row 0 col 0, row 0 col 1, ..., row 1 col 0, ...).
 
     Raises:
-        ValueError: If tiles_x or tiles_y is less than 1.
+        ValueError: If tiles_columns or tiles_rows is less than 1.
     """
-    if tiles_x < 1 or tiles_y < 1:
+    if tiles_columns < 1 or tiles_rows < 1:
         raise ValueError(
-            f"Tile grid dimensions must be >= 1, got tiles_x={tiles_x}, tiles_y={tiles_y}"
+            f"Tile grid dimensions must be >= 1, got tiles_columns={tiles_columns}, tiles_rows={tiles_rows}"
         )
 
     regions: list[TileRegion] = []
-    for row in range(tiles_y):
-        for col in range(tiles_x):
+    for row in range(tiles_rows):
+        for col in range(tiles_columns):
             regions.append(
                 TileRegion(
                     column=col,

@@ -30,11 +30,11 @@ class TestComputeTileRegions:
         assert regions[2].column == 2
         assert all(r.row == 0 for r in regions)
 
-    def test_invalid_tiles_x(self):
+    def test_invalid_tiles_columns(self):
         with pytest.raises(ValueError):
             compute_tile_regions(0, 2)
 
-    def test_invalid_tiles_y(self):
+    def test_invalid_tiles_rows(self):
         with pytest.raises(ValueError):
             compute_tile_regions(2, -1)
 

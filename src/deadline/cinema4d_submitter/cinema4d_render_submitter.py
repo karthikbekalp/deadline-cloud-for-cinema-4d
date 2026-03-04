@@ -239,20 +239,20 @@ def _get_job_template(
         # Add tile parameters when tile rendering is enabled
         enable_tile_rendering = getattr(settings, "enable_tile_rendering", False)
         if enable_tile_rendering:
-            tiles_x = getattr(settings, "tiles_x", 2)
-            tiles_y = getattr(settings, "tiles_y", 2)
+            tiles_columns = getattr(settings, "tiles_columns", 2)
+            tiles_rows = getattr(settings, "tiles_rows", 2)
 
             parameter_space["taskParameterDefinitions"].extend(
                 [
                     {
                         "name": "TileCol",
                         "type": "INT",
-                        "range": "0-%d" % (tiles_x - 1),
+                        "range": "0-%d" % (tiles_columns - 1),
                     },
                     {
                         "name": "TileRow",
                         "type": "INT",
-                        "range": "0-%d" % (tiles_y - 1),
+                        "range": "0-%d" % (tiles_rows - 1),
                     },
                 ]
             )
@@ -291,17 +291,17 @@ def _get_job_template(
                 run_data = step["script"]["embeddedFiles"][0]
                 run_data["data"] = (
                     "frame: {{Task.Param.Frame}}\n"
-                    "tile_column: {{Task.Param.TileCol}}\n"
-                    "tile_row: {{Task.Param.TileRow}}\n"
-                    "tiles_x: %d\n"
-                    "tiles_y: %d\n"
-                    % (tiles_x, tiles_y)
+                    "current_tile_column: {{Task.Param.TileCol}}\n"
+                    "current_tile_row: {{Task.Param.TileRow}}\n"
+                    "total_tiles_column: %d\n"
+                    "total_tiles_row: %d\n"
+                    % (tiles_columns, tiles_rows)
                 )
 
     # Add tile assembly steps (one per render step) when tile rendering is enabled
     if getattr(settings, "enable_tile_rendering", False) and adaptor:
-        tiles_x = getattr(settings, "tiles_x", 2)
-        tiles_y = getattr(settings, "tiles_y", 2)
+        tiles_columns = getattr(settings, "tiles_columns", 2)
+        tiles_rows = getattr(settings, "tiles_rows", 2)
         render_steps = list(job_template["steps"])
 
         for idx, render_step in enumerate(render_steps):
@@ -336,11 +336,11 @@ def _get_job_template(
                             "data": (
                                 "frame: {{Task.Param.Frame}}\n"
                                 "assemble_tiles: 'true'\n"
-                                "tiles_x: %d\n"
-                                "tiles_y: %d\n"
+                                "total_tiles_column: %d\n"
+                                "total_tiles_row: %d\n"
                                 "output_path: '%s'\n"
                                 "multi_pass_path: '%s'\n"
-                                % (tiles_x, tiles_y, assembly_output_path, assembly_multi_pass_path)
+                                % (tiles_columns, tiles_rows, assembly_output_path, assembly_multi_pass_path)
                             ),
                         }
                     ],

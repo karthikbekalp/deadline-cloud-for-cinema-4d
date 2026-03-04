@@ -75,8 +75,8 @@ def internal_create_job_bundle(
     job_bundle_dir: str,
     take_selection: TakeSelection = TakeSelection.MAIN,
     enable_tile_rendering: bool = False,
-    tiles_x: int = 2,
-    tiles_y: int = 2,
+    tiles_columns: int = 2,
+    tiles_rows: int = 2,
 ):
     """
     This function mimics the call that Cinema 4D submitter does to generate the job bundle.
@@ -85,8 +85,8 @@ def internal_create_job_bundle(
     render_settings = initialize_render_settings()
     render_settings.take_selection = take_selection
     render_settings.enable_tile_rendering = enable_tile_rendering
-    render_settings.tiles_x = tiles_x
-    render_settings.tiles_y = tiles_y
+    render_settings.tiles_columns = tiles_columns
+    render_settings.tiles_rows = tiles_rows
 
     doc = c4d.documents.GetActiveDocument()
 

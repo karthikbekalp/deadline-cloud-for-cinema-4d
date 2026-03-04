@@ -758,7 +758,7 @@ class TestStartRenderTileRegion:
         self, mock_base_time: Mock, mock_bitmap: Mock, mock_render_document: Mock,
         mock_base_bitmap: Mock,
     ):
-        """When tiles_x is in data, RDATA_RENDERREGION should be set to True
+        """When total_tiles_column is in data, RDATA_RENDERREGION should be set to True
         and pixel-based boundary values should be applied."""
         handler = Cinema4DHandler(mock_map_path)
         handler.cached_text_was_used_in_previous_frame = False
@@ -786,10 +786,10 @@ class TestStartRenderTileRegion:
 
         tile_data = {
             "frame": 1,
-            "tile_column": 0,
-            "tile_row": 0,
-            "tiles_x": 2,
-            "tiles_y": 2,
+            "current_tile_column": 0,
+            "current_tile_row": 0,
+            "total_tiles_column": 2,
+            "total_tiles_row": 2,
         }
 
         with patch.object(handler, "_cache_text_if_needed", return_value=False):

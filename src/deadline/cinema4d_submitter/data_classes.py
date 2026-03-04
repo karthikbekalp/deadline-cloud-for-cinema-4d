@@ -69,8 +69,8 @@ class RenderSubmitterUISettings:
     output_directories: list[str] = field(default_factory=list, metadata={"sticky": True})
 
     enable_tile_rendering: bool = field(default=False, metadata={"sticky": True})
-    tiles_x: int = field(default=2, metadata={"sticky": True})
-    tiles_y: int = field(default=2, metadata={"sticky": True})
+    tiles_columns: int = field(default=2, metadata={"sticky": True})
+    tiles_rows: int = field(default=2, metadata={"sticky": True})
 
     take_selection: TakeSelection = field(default=TakeSelection.MAIN, metadata={"sticky": True})
     activate_error_checking: str = field(

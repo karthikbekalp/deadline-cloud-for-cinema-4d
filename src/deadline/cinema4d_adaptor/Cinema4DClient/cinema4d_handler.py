@@ -276,20 +276,21 @@ class Cinema4DHandler:
             )
 
         # Apply tile render region if present
-        # Tile data arrives as grid coordinates (column, row, tiles_x, tiles_y).
+        # Tile data arrives as grid coordinates (current_tile_column, current_tile_row,
+        # total_tiles_column, total_tiles_row).
         # We compute the normalized region and convert to pixel coordinates.
-        is_tile_render = "tiles_x" in data
+        is_tile_render = "total_tiles_column" in data
         tile_output_path = ""
         if is_tile_render:
-            tiles_x = int(data["tiles_x"])
-            tiles_y = int(data["tiles_y"])
-            tile_col = int(data["tile_column"])
-            tile_row = int(data["tile_row"])
+            tiles_columns = int(data["total_tiles_column"])
+            tiles_rows = int(data["total_tiles_row"])
+            tile_col = int(data["current_tile_column"])
+            tile_row = int(data["current_tile_row"])
 
             full_w = int(self.render_data[c4d.RDATA_XRES])
             full_h = int(self.render_data[c4d.RDATA_YRES])
-            tile_w = full_w // tiles_x
-            tile_h = full_h // tiles_y
+            tile_w = full_w // tiles_columns
+            tile_h = full_h // tiles_rows
 
             region_left = tile_col * tile_w
             region_top = tile_row * tile_h
@@ -469,8 +470,8 @@ class Cinema4DHandler:
 
     def assemble_tiles(self, data: dict) -> None:
         """Assemble tile images into a single full-resolution image using C4D's BaseBitmap."""
-        tiles_x = int(data["tiles_x"])
-        tiles_y = int(data["tiles_y"])
+        tiles_columns = int(data["total_tiles_column"])
+        tiles_rows = int(data["total_tiles_row"])
         frame = int(data["frame"])
         output_path = data.get("output_path", "")
         multi_pass_path = data.get("multi_pass_path", "")
@@ -511,13 +512,13 @@ class Cinema4DHandler:
         tile_w = first_tile.GetBw()
         tile_h = first_tile.GetBh()
         tile_bpp = first_tile.GetBt()
-        full_w = tile_w * tiles_x
-        full_h = tile_h * tiles_y
+        full_w = tile_w * tiles_columns
+        full_h = tile_h * tiles_rows
 
         print(f"[assemble_tiles] first tile: {first_tile_path}")
         print(f"[assemble_tiles] tile size: {tile_w}x{tile_h}, bpp: {tile_bpp}")
         print(f"[assemble_tiles] final size: {full_w}x{full_h}")
-        print(f"[assemble_tiles] grid: {tiles_x}x{tiles_y}, frame: {frame}")
+        print(f"[assemble_tiles] grid: {tiles_columns}x{tiles_rows}, frame: {frame}")
 
         # Determine color mode and bytes-per-pixel based on bit depth.
         # GetPixelCnt/SetPixelCnt preserve full bit depth unlike GetPixel/SetPixel.
@@ -543,8 +544,8 @@ class Cinema4DHandler:
         row_buffer = bytearray(tile_w * inc)
         row_view = memoryview(row_buffer)
 
-        for row in range(tiles_y):
-            for col in range(tiles_x):
+        for row in range(tiles_rows):
+            for col in range(tiles_columns):
                 tile_path = f"{base}_{frame}_tile_{col}_{row}{existing_ext}"
                 tile_bmp = c4d.bitmaps.BaseBitmap()
                 load_result = tile_bmp.InitWith(tile_path)
@@ -608,7 +609,7 @@ class Cinema4DHandler:
         print(f"[assemble_tiles] saving to: {final_path}")
         print(f"[assemble_tiles] save filter: {final_filter}, ext: {existing_ext}")
         final_bmp.Save(final_path, final_filter)
-        print(f"Assembled {tiles_x * tiles_y} tiles into {final_path} ({full_w}x{full_h})")
+        print(f"Assembled {tiles_columns * tiles_rows} tiles into {final_path} ({full_w}x{full_h})")
 
         # Assemble multi-pass tiles if multi_pass_path is provided.
         # Multi-pass tiles are saved by C4D at full resolution (with only the tile
@@ -636,8 +637,8 @@ class Cinema4DHandler:
             else:
                 mp_full_w = first_mp.GetBw()
                 mp_full_h = first_mp.GetBh()
-                mp_tile_w = mp_full_w // tiles_x
-                mp_tile_h = mp_full_h // tiles_y
+                mp_tile_w = mp_full_w // tiles_columns
+                mp_tile_h = mp_full_h // tiles_rows
                 mp_bpp = first_mp.GetBt()
                 mp_bpc = mp_bpp // 3
 
@@ -658,8 +659,8 @@ class Cinema4DHandler:
 
                 print(f"[assemble_tiles] assembling multi-pass: {mp_full_w}x{mp_full_h}, tile size: {mp_tile_w}x{mp_tile_h}")
 
-                for row in range(tiles_y):
-                    for col in range(tiles_x):
+                for row in range(tiles_rows):
+                    for col in range(tiles_columns):
                         mp_tile_path = f"{mp_base}_tile_{col}_{row}_{padded_frame}{mp_ext}"
                         mp_tile_bmp = c4d.bitmaps.BaseBitmap()
                         mp_load = mp_tile_bmp.InitWith(mp_tile_path)
@@ -691,7 +692,7 @@ class Cinema4DHandler:
 
                 mp_final_filter = ext_to_filter.get(mp_ext.lower(), save_filter)
                 mp_final.Save(mp_final_path, mp_final_filter)
-                print(f"Assembled multi-pass {tiles_x * tiles_y} tiles into {mp_final_path}")
+                print(f"Assembled multi-pass {tiles_columns * tiles_rows} tiles into {mp_final_path}")
 
         print("Finished Rendering")
 
