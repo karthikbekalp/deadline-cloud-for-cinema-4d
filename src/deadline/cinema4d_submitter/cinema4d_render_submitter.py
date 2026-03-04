@@ -236,6 +236,28 @@ def _get_job_template(
                 "{{Param." + take_data.frames_parameter_name + "}}"
             )
 
+        # Add tile parameters when tile rendering is enabled
+        enable_tile_rendering = getattr(settings, "enable_tile_rendering", False)
+        if enable_tile_rendering:
+            tiles_x = getattr(settings, "tiles_x", 2)
+            tiles_y = getattr(settings, "tiles_y", 2)
+
+            parameter_space["taskParameterDefinitions"].extend(
+                [
+                    {
+                        "name": "TileCol",
+                        "type": "INT",
+                        "range": "0-%d" % (tiles_x - 1),
+                    },
+                    {
+                        "name": "TileRow",
+                        "type": "INT",
+                        "range": "0-%d" % (tiles_y - 1),
+                    },
+                ]
+            )
+            parameter_space["combination"] = "Frame * TileCol * TileRow"
+
         if adaptor is False:
             variables = step["stepEnvironments"][0]["variables"]
             variables["TAKE"] = take_data.name
@@ -249,6 +271,10 @@ def _get_job_template(
                 take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_data.name)
                 output_path = settings.output_path.replace("$take", take_name_for_path)
                 multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+
+                # Note: tile identifiers are NOT injected into init data paths.
+                # The handler adds tile suffixes when saving cropped tiles.
+
                 init_data["data"] = (
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '%s'\nmulti_pass_path: '%s'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % (take_data.name, output_path, multi_pass_path)
@@ -259,6 +285,69 @@ def _get_job_template(
                     "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '{{Param.OutputPath}}'\nmulti_pass_path: '{{Param.MultiPassPath}}'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
                     % take_data.name
                 )
+
+            # Update run-data to include tile region references when tile rendering is enabled
+            if enable_tile_rendering:
+                run_data = step["script"]["embeddedFiles"][0]
+                run_data["data"] = (
+                    "frame: {{Task.Param.Frame}}\n"
+                    "tile_column: {{Task.Param.TileCol}}\n"
+                    "tile_row: {{Task.Param.TileRow}}\n"
+                    "tiles_x: %d\n"
+                    "tiles_y: %d\n"
+                    % (tiles_x, tiles_y)
+                )
+
+    # Add tile assembly steps (one per render step) when tile rendering is enabled
+    if getattr(settings, "enable_tile_rendering", False) and adaptor:
+        tiles_x = getattr(settings, "tiles_x", 2)
+        tiles_y = getattr(settings, "tiles_y", 2)
+        render_steps = list(job_template["steps"])
+
+        for idx, render_step in enumerate(render_steps):
+            # Build assembly step environment — clean copy of render step's environment
+            assembly_env = deepcopy(render_step["stepEnvironments"])
+
+            # When the output path contains $take, resolve it to the actual take
+            # name so the assembly step looks for tiles at the correct path.
+            if has_take_token and idx < len(takes):
+                take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", takes[idx].name)
+                assembly_output_path = settings.output_path.replace("$take", take_name_for_path)
+                assembly_multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+            else:
+                assembly_output_path = "{{Param.OutputPath}}"
+                assembly_multi_pass_path = "{{Param.MultiPassPath}}"
+
+            assembly_step = {
+                "name": f"{render_step['name']} - Assemble Tiles",
+                "dependencies": [{"dependsOn": render_step["name"]}],
+                "parameterSpace": {
+                    "taskParameterDefinitions": [
+                        deepcopy(render_step["parameterSpace"]["taskParameterDefinitions"][0])
+                    ]
+                },
+                "stepEnvironments": assembly_env,
+                "script": {
+                    "embeddedFiles": [
+                        {
+                            "name": "runData",
+                            "filename": "run-data.yaml",
+                            "type": "TEXT",
+                            "data": (
+                                "frame: {{Task.Param.Frame}}\n"
+                                "assemble_tiles: 'true'\n"
+                                "tiles_x: %d\n"
+                                "tiles_y: %d\n"
+                                "output_path: '%s'\n"
+                                "multi_pass_path: '%s'\n"
+                                % (tiles_x, tiles_y, assembly_output_path, assembly_multi_pass_path)
+                            ),
+                        }
+                    ],
+                    "actions": deepcopy(render_step["script"]["actions"]),
+                },
+            }
+            job_template["steps"].append(assembly_step)
 
     # If Arnold is one of the renderers, add Arnold-specific parameters
     if "arnold" in renderers:

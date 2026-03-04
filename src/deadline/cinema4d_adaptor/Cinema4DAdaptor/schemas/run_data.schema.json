@@ -2,7 +2,14 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "frame": { "type": "number" }
+      "frame": { "type": "number" },
+      "tile_column": { "type": "integer" },
+      "tile_row": { "type": "integer" },
+      "tiles_x": { "type": "integer" },
+      "tiles_y": { "type": "integer" },
+      "assemble_tiles": { "type": "string" },
+      "output_path": { "type": "string" },
+      "multi_pass_path": { "type": "string" }
     },
     "required":[
       "frame"

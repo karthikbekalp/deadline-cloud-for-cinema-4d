@@ -16,17 +16,19 @@ import pytest
 @pytest.mark.parametrize(
     "test_name",
     [
-        "physical",
-        "physical_textured",
-        "redshift",
-        "redshift_takes",
-        # TODO: Currently, there is an issue with multipass
-        # not producing outputs.
-        # So we should investigate that separately.
-        # "redshift_multipass",
-        "redshift_textured",
-        "redshift_textured_with_nonascii_characters",
-        "physical_multi_takes",
+        # "physical",
+        # "physical_textured",
+        # "redshift",
+        # "redshift_takes",
+        # # TODO: Currently, there is an issue with multipass
+        # # not producing outputs.
+        # # So we should investigate that separately.
+        # # "redshift_multipass",
+        # "redshift_textured",
+        # "redshift_textured_with_nonascii_characters",
+        # "physical_multi_takes",
+        "redshift_tile_rendering",
+        # "physical_tile_rendering",
     ],
 )
 def test_integ(

@@ -31,6 +31,7 @@ OUTPUT_PATH_KEY = "output_path"
 MULTIPASS_PATH_KEY = "multi_pass_path"
 SCENE_FILE_KEY = "scene_file"
 START_RENDER_KEY = "start_render"
+ASSEMBLE_TILES_KEY = "assemble_tiles"
 TAKE_KEY = "take"
 
 
@@ -78,6 +79,7 @@ class Cinema4DHandler:
             TAKE_KEY: self.set_take,
             FRAME_KEY: self.set_frame,
             START_RENDER_KEY: self.start_render,
+            ASSEMBLE_TILES_KEY: self.assemble_tiles,
             OUTPUT_PATH_KEY: self.output_path,
             MULTIPASS_PATH_KEY: self.multi_pass_path,
             USE_CACHED_TEXT_KEY: self.use_cached_text,
@@ -273,12 +275,80 @@ class Cinema4DHandler:
                 self.render_data[c4d.RDATA_MULTIPASS_FILENAME]
             )
 
+        # Apply tile render region if present
+        # Tile data arrives as grid coordinates (column, row, tiles_x, tiles_y).
+        # We compute the normalized region and convert to pixel coordinates.
+        is_tile_render = "tiles_x" in data
+        tile_output_path = ""
+        if is_tile_render:
+            tiles_x = int(data["tiles_x"])
+            tiles_y = int(data["tiles_y"])
+            tile_col = int(data["tile_column"])
+            tile_row = int(data["tile_row"])
+
+            full_w = int(self.render_data[c4d.RDATA_XRES])
+            full_h = int(self.render_data[c4d.RDATA_YRES])
+            tile_w = full_w // tiles_x
+            tile_h = full_h // tiles_y
+
+            region_left = tile_col * tile_w
+            region_top = tile_row * tile_h
+            region_right = region_left + tile_w
+            region_bottom = region_top + tile_h
+
+            self.render_data[c4d.RDATA_RENDERREGION] = True
+            self.render_data[c4d.RDATA_RENDERREGION_LEFT] = region_left
+            self.render_data[c4d.RDATA_RENDERREGION_TOP] = region_top
+            self.render_data[c4d.RDATA_RENDERREGION_RIGHT] = region_right
+            self.render_data[c4d.RDATA_RENDERREGION_BOTTOM] = region_bottom
+
+            # Save the mapped output paths for tile output.
+            # We clear RDATA_PATH before RenderDocument so C4D doesn't save the
+            # full-resolution beauty image (we crop and save it manually).
+            # For multi-pass, we set RDATA_MULTIPASS_FILENAME to a tile-specific
+            # path so C4D saves multi-pass layers natively — GetClonePart only
+            # clones the beauty layer, so manual save would lose multi-pass data.
+            tile_output_path = self.render_data[c4d.RDATA_PATH] or ""
+            tile_multipass_path = self.render_data[c4d.RDATA_MULTIPASS_FILENAME] or ""
+            self.render_data[c4d.RDATA_PATH] = ""
+
+            # Build a tile-specific multi-pass path so C4D saves multi-pass natively.
+            # We give C4D a base path WITHOUT frame number or extension — C4D's
+            # native save appends its own frame numbering and format extension.
+            # Including them here would cause a double frame suffix and a filename
+            # mismatch at assembly time.
+            if tile_multipass_path:
+                mp_base, _mp_ext = os.path.splitext(tile_multipass_path)
+                tile_mp_save_path = f"{mp_base}_tile_{tile_col}_{tile_row}"
+                mp_output_dir = os.path.dirname(tile_mp_save_path)
+                if mp_output_dir:
+                    os.makedirs(mp_output_dir, exist_ok=True)
+                self.render_data[c4d.RDATA_MULTIPASS_FILENAME] = tile_mp_save_path
+            else:
+                self.render_data[c4d.RDATA_MULTIPASS_FILENAME] = ""
+
+        # Get the live render data instance — modifications here affect the document
+        # directly, which is required for OCIO flags to take effect during rendering.
+        rd = self.render_data.GetDataInstance()
+
+        # OCIO handling: for 8-bit output, disable the render-time OCIO view transform
+        # bake so we can bake it manually after rendering. This must be set on the live
+        # render data instance (not a clone) for the flag to take effect.
+        # See Maxon SDK open_color_io example: RenderOcioDocumentToPictureViewer.
+        requires_baking = rd[c4d.RDATA_FORMATDEPTH] is c4d.RDATA_FORMATDEPTH_8
+        orig_bake_flag = None
+        print(f"OCIO: format_depth={rd[c4d.RDATA_FORMATDEPTH]}, requires_baking={requires_baking}, is_tile_render={is_tile_render}")
+        if is_tile_render and requires_baking:
+            orig_bake_flag = rd.GetBool(c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER)
+            rd[c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER] = False
+            print(f"OCIO: disabled RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER (was {orig_bake_flag})")
+
         bm = bitmaps.MultipassBitmap(
             int(self.render_data[c4d.RDATA_XRES]),
             int(self.render_data[c4d.RDATA_YRES]),
-            c4d.COLORMODE_RGB,
+            c4d.COLORMODE_RGBf,
         )
-        rd = self.render_data.GetDataInstance()
+        bm.AddChannel(True, True)
 
         self.cached_text_was_used_in_previous_frame = self._cache_text_if_needed(frame_time)
 
@@ -289,13 +359,341 @@ class Cinema4DHandler:
             c4d.RENDERFLAGS_EXTERNAL | c4d.RENDERFLAGS_SHOWERRORS,
             prog=progress_callback,
         )
+
+        # Restore the OCIO bake flag to its original value
+        if orig_bake_flag is not None:
+            rd[c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER] = orig_bake_flag
+            print(f"OCIO: restored RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER to {orig_bake_flag}")
+
+        # Restore output paths so subsequent tile renders can use them
+        if is_tile_render:
+            if tile_output_path:
+                self.render_data[c4d.RDATA_PATH] = tile_output_path
+            if tile_multipass_path:
+                self.render_data[c4d.RDATA_MULTIPASS_FILENAME] = tile_multipass_path
         result_description = _RENDERRESULT.get(result)
         if result_description is None:
             raise RuntimeError("Error: unhandled render result: %s" % result)
         if result != c4d.RENDERRESULT_OK:
             raise RuntimeError("Error: render result: %s" % result_description)
+
+        # Bake OCIO view transform and null profiles for tile renders.
+        # Following the Maxon SDK reference (open_color_io example):
+        # - For 8-bit: bake the OCIO view transform into the bitmap, then null profiles
+        # - For all depths: null display/view profiles to prevent double-application on save
+        if is_tile_render:
+            format_depth = rd[c4d.RDATA_FORMATDEPTH]
+            print(f"OCIO: tile post-render — format_depth={format_depth}, requires_baking={requires_baking}")
+            print(f"OCIO: RDATA_FORMATDEPTH_8={c4d.RDATA_FORMATDEPTH_8}, match_is={format_depth is c4d.RDATA_FORMATDEPTH_8}, match_eq={format_depth == c4d.RDATA_FORMATDEPTH_8}")
+            print(f"OCIO: rendered bmp size={bm.GetBw()}x{bm.GetBh()}, bpp={bm.GetBt()}")
+
+            # Sample a pixel from the rendered bitmap before any OCIO processing
+            sample_x = region_left + tile_w // 2
+            sample_y = region_top + tile_h // 2
+            pre_bake_pixel = bm.GetPixel(sample_x, sample_y)
+            print(f"OCIO: pre-bake sample pixel ({sample_x},{sample_y}): {pre_bake_pixel}")
+
+            if requires_baking:
+                baked = c4d.documents.BakeOcioViewToBitmap(bm, rd, c4d.SAVEBIT_NONE)
+                print(f"OCIO: BakeOcioViewToBitmap returned {'a bitmap' if baked else 'None'}")
+                bm = baked or bm
+                post_bake_pixel = bm.GetPixel(sample_x, sample_y)
+                print(f"OCIO: post-bake sample pixel ({sample_x},{sample_y}): {post_bake_pixel}")
+
+            bm.SetColorProfile(
+                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE
+            )
+            bm.SetColorProfile(
+                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM
+            )
+            print("OCIO: nulled DISPLAYSPACE and VIEW_TRANSFORM color profiles")
+            post_null_pixel = bm.GetPixel(sample_x, sample_y)
+            print(f"OCIO: post-null-profiles sample pixel ({sample_x},{sample_y}): {post_null_pixel}")
+
+            # Determine save bit flags based on format depth
+            if format_depth is c4d.RDATA_FORMATDEPTH_16:
+                save_bits = c4d.SAVEBIT_16BITCHANNELS
+            elif format_depth is c4d.RDATA_FORMATDEPTH_32:
+                save_bits = c4d.SAVEBIT_32BITCHANNELS
+            else:
+                save_bits = c4d.SAVEBIT_NONE
+
+        # Crop the tile region from the full bitmap using GetClonePart to preserve
+        # bit depth and float data (GetPixel/SetPixel truncates to 8-bit integers).
+        if is_tile_render:
+            tile_bmp = bm.GetClonePart(region_left, region_top, tile_w, tile_h)
+            if tile_bmp is None:
+                raise RuntimeError(
+                    f"Failed to crop tile ({tile_col}, {tile_row}) from rendered bitmap"
+                )
+            crop_sample = tile_bmp.GetPixel(tile_w // 2, tile_h // 2)
+            print(f"OCIO: cropped tile via GetClonePart — tile size={tile_bmp.GetBw()}x{tile_bmp.GetBh()}, bit depth={tile_bmp.GetBt()}")
+            print(f"OCIO: cropped tile center pixel ({tile_w // 2},{tile_h // 2}): {crop_sample}")
+
+            # Determine file extension from render format setting
+            format_id = self.render_data[c4d.RDATA_FORMAT]
+            format_map = {
+                c4d.FILTER_PNG: (".png", c4d.FILTER_PNG),
+                c4d.FILTER_JPG: (".jpg", c4d.FILTER_JPG),
+                c4d.FILTER_TIF: (".tif", c4d.FILTER_TIF),
+                c4d.FILTER_BMP: (".bmp", c4d.FILTER_BMP),
+                c4d.FILTER_EXR: (".exr", c4d.FILTER_EXR),
+                c4d.FILTER_HDR: (".hdr", c4d.FILTER_HDR),
+                c4d.FILTER_PSD: (".psd", c4d.FILTER_PSD),
+                c4d.FILTER_TGA: (".tga", c4d.FILTER_TGA),
+            }
+            ext, save_filter = format_map.get(format_id, (".png", c4d.FILTER_PNG))
+            ext_to_filter = {v[0]: v[1] for v in format_map.values()}
+
+            if tile_output_path:
+                # Ensure the output directory exists
+                output_dir = os.path.dirname(tile_output_path)
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+
+                base, existing_ext = os.path.splitext(tile_output_path)
+                if not existing_ext:
+                    tile_path = f"{base}_{frame}_tile_{tile_col}_{tile_row}{ext}"
+                    tile_save_filter = save_filter
+                else:
+                    tile_path = f"{base}_{frame}_tile_{tile_col}_{tile_row}{existing_ext}"
+                    tile_save_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
+
+                tile_bmp.Save(tile_path, tile_save_filter, c4d.BaseContainer(), save_bits)
+                print(f"Saved cropped tile ({tile_w}x{tile_h}) to {tile_path}")
+
+            if tile_multipass_path:
+                print(f"Multi-pass tile saved natively by C4D to tile ({tile_col}, {tile_row})")
+
+        print("Finished Rendering")
+
+    def assemble_tiles(self, data: dict) -> None:
+        """Assemble tile images into a single full-resolution image using C4D's BaseBitmap."""
+        tiles_x = int(data["tiles_x"])
+        tiles_y = int(data["tiles_y"])
+        frame = int(data["frame"])
+        output_path = data.get("output_path", "")
+        multi_pass_path = data.get("multi_pass_path", "")
+
+        if not output_path:
+            raise RuntimeError("assemble_tiles: no output_path provided")
+
+        output_path = self.map_path(output_path)
+        if multi_pass_path:
+            multi_pass_path = self.map_path(multi_pass_path)
+
+        # Determine extension and save filter from the document's render format
+        render_data = self.doc.GetActiveRenderData()
+        format_id = render_data[c4d.RDATA_FORMAT] if render_data else 0
+        format_map = {
+            c4d.FILTER_PNG: (".png", c4d.FILTER_PNG),
+            c4d.FILTER_JPG: (".jpg", c4d.FILTER_JPG),
+            c4d.FILTER_TIF: (".tif", c4d.FILTER_TIF),
+            c4d.FILTER_BMP: (".bmp", c4d.FILTER_BMP),
+            c4d.FILTER_EXR: (".exr", c4d.FILTER_EXR),
+            c4d.FILTER_HDR: (".hdr", c4d.FILTER_HDR),
+            c4d.FILTER_PSD: (".psd", c4d.FILTER_PSD),
+            c4d.FILTER_TGA: (".tga", c4d.FILTER_TGA),
+        }
+        ext, save_filter = format_map.get(format_id, (".png", c4d.FILTER_PNG))
+
+        base, existing_ext = os.path.splitext(output_path)
+        if not existing_ext:
+            existing_ext = ext
+
+        # Load the first tile to determine tile dimensions
+        first_tile_path = f"{base}_{frame}_tile_0_0{existing_ext}"
+        first_tile = c4d.bitmaps.BaseBitmap()
+        result = first_tile.InitWith(first_tile_path)
+        if result[0] != c4d.IMAGERESULT_OK:
+            raise RuntimeError(f"assemble_tiles: failed to load first tile: {first_tile_path}")
+
+        tile_w = first_tile.GetBw()
+        tile_h = first_tile.GetBh()
+        tile_bpp = first_tile.GetBt()
+        full_w = tile_w * tiles_x
+        full_h = tile_h * tiles_y
+
+        print(f"[assemble_tiles] first tile: {first_tile_path}")
+        print(f"[assemble_tiles] tile size: {tile_w}x{tile_h}, bpp: {tile_bpp}")
+        print(f"[assemble_tiles] final size: {full_w}x{full_h}")
+        print(f"[assemble_tiles] grid: {tiles_x}x{tiles_y}, frame: {frame}")
+
+        # Determine color mode and bytes-per-pixel based on bit depth.
+        # GetPixelCnt/SetPixelCnt preserve full bit depth unlike GetPixel/SetPixel.
+        bpc = tile_bpp // 3  # bits per channel
+        if bpc == 32:
+            color_mode = c4d.COLORMODE_RGBf
+            inc = 12  # 3 channels * 4 bytes (float)
+        elif bpc == 16:
+            color_mode = c4d.COLORMODE_RGBw
+            inc = 6   # 3 channels * 2 bytes
         else:
-            print("Finished Rendering")
+            color_mode = c4d.COLORMODE_RGB
+            inc = 3   # 3 channels * 1 byte
+
+        print(f"[assemble_tiles] bits per channel: {bpc}, color_mode: {color_mode}, inc: {inc}")
+
+        # Create the full-resolution output bitmap matching tile bit depth
+        final_bmp = c4d.bitmaps.BaseBitmap()
+        final_bmp.Init(full_w, full_h, depth=tile_bpp)
+        print(f"[assemble_tiles] final_bmp initialized: {final_bmp.GetBw()}x{final_bmp.GetBh()}, bpp: {final_bmp.GetBt()}")
+
+        # Reusable buffer for one row of tile pixels
+        row_buffer = bytearray(tile_w * inc)
+        row_view = memoryview(row_buffer)
+
+        for row in range(tiles_y):
+            for col in range(tiles_x):
+                tile_path = f"{base}_{frame}_tile_{col}_{row}{existing_ext}"
+                tile_bmp = c4d.bitmaps.BaseBitmap()
+                load_result = tile_bmp.InitWith(tile_path)
+                if load_result[0] != c4d.IMAGERESULT_OK:
+                    raise RuntimeError(f"assemble_tiles: failed to load tile: {tile_path}")
+
+                loaded_w = tile_bmp.GetBw()
+                loaded_h = tile_bmp.GetBh()
+                loaded_bpp = tile_bmp.GetBt()
+                print(f"[assemble_tiles] tile ({col},{row}): {tile_path}")
+                print(f"[assemble_tiles]   loaded size: {loaded_w}x{loaded_h}, bpp: {loaded_bpp}")
+
+                # Sample a pixel from the tile for comparison
+                sample_pixel = tile_bmp.GetPixel(0, 0)
+                print(f"[assemble_tiles]   tile sample pixel (0,0): {sample_pixel}")
+
+                # Copy tile row-by-row into the final bitmap at the correct offset
+                dst_x = col * tile_w
+                dst_y = row * tile_h
+                print(f"[assemble_tiles]   writing to dst_x={dst_x}, dst_y={dst_y}")
+                for py in range(tile_h):
+                    tile_bmp.GetPixelCnt(
+                        0, py, tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
+                    )
+                    final_bmp.SetPixelCnt(
+                        dst_x, dst_y + py, tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
+                    )
+
+                # Verify: read back the same pixel from the final bitmap
+                verify_pixel = final_bmp.GetPixel(dst_x, dst_y)
+                print(f"[assemble_tiles]   final verify pixel ({dst_x},{dst_y}): {verify_pixel}")
+
+                print(f"Assembled tile ({col}, {row}) from {tile_path}")
+
+        # Save the assembled image
+        final_path = f"{base}_{frame}{existing_ext}"
+        output_dir = os.path.dirname(final_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        # Null color profiles to prevent C4D from applying an OCIO/color transform
+        # on save. The tile images already have the correct color baked in — without
+        # this, the assembled image gets a double gamma application and looks darker.
+        # Copy the color profile from the first tile (which was saved correctly) to
+        # ensure the assembled image uses the same profile.
+        first_tile_profile = first_tile.GetColorProfile()
+        if first_tile_profile is not None:
+            final_bmp.SetColorProfile(first_tile_profile)
+            print(f"[assemble_tiles] copied color profile from first tile")
+        else:
+            final_bmp.SetColorProfile(
+                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE
+            )
+            final_bmp.SetColorProfile(
+                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM
+            )
+            print("[assemble_tiles] nulled color profiles on final bitmap (no tile profile found)")
+
+        ext_to_filter = {v[0]: v[1] for v in format_map.values()}
+        final_filter = ext_to_filter.get(existing_ext.lower(), save_filter)
+        print(f"[assemble_tiles] saving to: {final_path}")
+        print(f"[assemble_tiles] save filter: {final_filter}, ext: {existing_ext}")
+        final_bmp.Save(final_path, final_filter)
+        print(f"Assembled {tiles_x * tiles_y} tiles into {final_path} ({full_w}x{full_h})")
+
+        # Assemble multi-pass tiles if multi_pass_path is provided.
+        # Multi-pass tiles are saved by C4D at full resolution (with only the tile
+        # region rendered). We extract each tile's region and composite them.
+        # In start_render we set RDATA_MULTIPASS_FILENAME to a base path like
+        # "{mp_base}_tile_{col}_{row}" (no frame number or extension). C4D's native
+        # save appends "_{frame:04d}" and the format extension determined by the
+        # multi-pass format setting (RDATA_MULTIPASS_SAVEFORMAT), e.g.
+        # "{mp_base}_tile_0_0_0150.psd".
+        if multi_pass_path:
+            mp_base, mp_ext = os.path.splitext(multi_pass_path)
+            if not mp_ext:
+                # Determine extension from the multi-pass save format setting
+                mp_format_id = render_data[c4d.RDATA_MULTIPASS_SAVEFORMAT] if render_data else 0
+                mp_ext = format_map.get(mp_format_id, (".png", c4d.FILTER_PNG))[0]
+            padded_frame = str(frame).zfill(4)
+
+            # Load the first multi-pass tile to get dimensions
+            first_mp_path = f"{mp_base}_tile_0_0_{padded_frame}{mp_ext}"
+            print(f"[assemble_tiles] looking for first multi-pass tile: {first_mp_path}")
+            first_mp = c4d.bitmaps.BaseBitmap()
+            mp_result = first_mp.InitWith(first_mp_path)
+            if mp_result[0] != c4d.IMAGERESULT_OK:
+                print(f"[assemble_tiles] WARNING: failed to load first multi-pass tile: {first_mp_path}, skipping multi-pass assembly")
+            else:
+                mp_full_w = first_mp.GetBw()
+                mp_full_h = first_mp.GetBh()
+                mp_tile_w = mp_full_w // tiles_x
+                mp_tile_h = mp_full_h // tiles_y
+                mp_bpp = first_mp.GetBt()
+                mp_bpc = mp_bpp // 3
+
+                if mp_bpc == 32:
+                    mp_color_mode = c4d.COLORMODE_RGBf
+                    mp_inc = 12
+                elif mp_bpc == 16:
+                    mp_color_mode = c4d.COLORMODE_RGBw
+                    mp_inc = 6
+                else:
+                    mp_color_mode = c4d.COLORMODE_RGB
+                    mp_inc = 3
+
+                mp_final = c4d.bitmaps.BaseBitmap()
+                mp_final.Init(mp_full_w, mp_full_h, depth=mp_bpp)
+                mp_row_buffer = bytearray(mp_tile_w * mp_inc)
+                mp_row_view = memoryview(mp_row_buffer)
+
+                print(f"[assemble_tiles] assembling multi-pass: {mp_full_w}x{mp_full_h}, tile size: {mp_tile_w}x{mp_tile_h}")
+
+                for row in range(tiles_y):
+                    for col in range(tiles_x):
+                        mp_tile_path = f"{mp_base}_tile_{col}_{row}_{padded_frame}{mp_ext}"
+                        mp_tile_bmp = c4d.bitmaps.BaseBitmap()
+                        mp_load = mp_tile_bmp.InitWith(mp_tile_path)
+                        if mp_load[0] != c4d.IMAGERESULT_OK:
+                            print(f"[assemble_tiles] WARNING: failed to load multi-pass tile: {mp_tile_path}")
+                            continue
+
+                        # Extract the tile region from the full-res multi-pass file
+                        src_x = col * mp_tile_w
+                        src_y = row * mp_tile_h
+                        for py in range(mp_tile_h):
+                            mp_tile_bmp.GetPixelCnt(
+                                src_x, src_y + py, mp_tile_w, mp_row_view, mp_inc, mp_color_mode, c4d.PIXELCNT_0
+                            )
+                            mp_final.SetPixelCnt(
+                                src_x, src_y + py, mp_tile_w, mp_row_view, mp_inc, mp_color_mode, c4d.PIXELCNT_0
+                            )
+                        print(f"[assemble_tiles] assembled multi-pass tile ({col}, {row})")
+
+                mp_final_path = f"{mp_base}_{frame}{mp_ext}"
+                mp_out_dir = os.path.dirname(mp_final_path)
+                if mp_out_dir:
+                    os.makedirs(mp_out_dir, exist_ok=True)
+
+                # Copy color profile from first tile
+                mp_profile = first_mp.GetColorProfile()
+                if mp_profile is not None:
+                    mp_final.SetColorProfile(mp_profile)
+
+                mp_final_filter = ext_to_filter.get(mp_ext.lower(), save_filter)
+                mp_final.Save(mp_final_path, mp_final_filter)
+                print(f"Assembled multi-pass {tiles_x * tiles_y} tiles into {mp_final_path}")
+
+        print("Finished Rendering")
 
     def output_path(self, data: dict) -> None:
         output_path = data.get(OUTPUT_PATH_KEY, "")

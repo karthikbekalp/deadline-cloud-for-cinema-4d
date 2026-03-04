@@ -119,7 +119,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
 
     @property
     def integration_data_interface_version(self) -> SemanticVersion:
-        return SemanticVersion(major=0, minor=3)
+        return SemanticVersion(major=0, minor=4)
 
     @staticmethod
     def _get_timer(timeout: int | float) -> Callable[[], bool]:
@@ -514,7 +514,23 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
             if name in run_data:
                 self._action_queue.enqueue_action(Action(name, {name: run_data[name]}))
 
-        self._action_queue.enqueue_action(Action("start_render", {"frame": run_data["frame"]}))
+        start_render_data = {"frame": run_data["frame"]}
+        for key in ("tile_column", "tile_row", "tiles_x", "tiles_y"):
+            if key in run_data:
+                start_render_data[key] = int(run_data[key])
+
+        # Dispatch either tile assembly or render
+        if run_data.get("assemble_tiles"):
+            assemble_data = {
+                "frame": run_data["frame"],
+                "tiles_x": int(run_data["tiles_x"]),
+                "tiles_y": int(run_data["tiles_y"]),
+                "output_path": run_data.get("output_path", ""),
+                "multi_pass_path": run_data.get("multi_pass_path", ""),
+            }
+            self._action_queue.enqueue_action(Action("assemble_tiles", assemble_data))
+        else:
+            self._action_queue.enqueue_action(Action("start_render", start_render_data))
 
         while self._cinema4d_is_rendering and not self._has_exception:
             time.sleep(0.1)  # busy wait so that on_cleanup is not called

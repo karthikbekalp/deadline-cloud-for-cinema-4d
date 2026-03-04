@@ -747,6 +747,87 @@ class TestStartRenderWithTextCaching:
         assert handler.cached_text_was_used_in_previous_frame is False
 
 
+class TestStartRenderTileRegion:
+    """Tests for start_render method with tile region support"""
+
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.bitmaps.BaseBitmap")
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.documents.RenderDocument")
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.bitmaps.MultipassBitmap")
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.BaseTime")
+    def test_start_render_sets_render_region_when_tile_data_present(
+        self, mock_base_time: Mock, mock_bitmap: Mock, mock_render_document: Mock,
+        mock_base_bitmap: Mock,
+    ):
+        """When tiles_x is in data, RDATA_RENDERREGION should be set to True
+        and pixel-based boundary values should be applied."""
+        handler = Cinema4DHandler(mock_map_path)
+        handler.cached_text_was_used_in_previous_frame = False
+
+        mock_doc = Mock()
+        mock_render_data = MagicMock()
+        mock_render_data.GetDataInstance = Mock()
+        # Simulate 100x100 resolution
+        mock_render_data.__getitem__ = Mock(side_effect=lambda k: {
+            c4d.RDATA_XRES: 100,
+            c4d.RDATA_YRES: 100,
+            c4d.RDATA_PATH: "",
+            c4d.RDATA_MULTIPASS_SAVEIMAGE: False,
+            c4d.RDATA_MULTIPASS_FILENAME: "",
+        }.get(k, 0))
+        mock_doc.GetActiveRenderData.return_value = mock_render_data
+        mock_doc.GetFps.return_value = 30
+        handler.doc = mock_doc
+
+        mock_render_document.return_value = c4d.RENDERRESULT_OK
+
+        # Make the bitmap mock return a proper (r, g, b) tuple from GetPixel
+        mock_bm_instance = mock_bitmap.return_value
+        mock_bm_instance.GetPixel.return_value = (0, 0, 0)
+
+        tile_data = {
+            "frame": 1,
+            "tile_column": 0,
+            "tile_row": 0,
+            "tiles_x": 2,
+            "tiles_y": 2,
+        }
+
+        with patch.object(handler, "_cache_text_if_needed", return_value=False):
+            handler.start_render(tile_data)
+
+        mock_render_data.__setitem__.assert_any_call(c4d.RDATA_RENDERREGION, True)
+        mock_render_data.__setitem__.assert_any_call(c4d.RDATA_RENDERREGION_LEFT, 0)
+        mock_render_data.__setitem__.assert_any_call(c4d.RDATA_RENDERREGION_TOP, 0)
+        mock_render_data.__setitem__.assert_any_call(c4d.RDATA_RENDERREGION_RIGHT, 50)
+        mock_render_data.__setitem__.assert_any_call(c4d.RDATA_RENDERREGION_BOTTOM, 50)
+
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.documents.RenderDocument")
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.bitmaps.MultipassBitmap")
+    @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.BaseTime")
+    def test_start_render_does_not_set_render_region_when_tile_data_absent(
+        self, mock_base_time: Mock, mock_bitmap: Mock, mock_render_document: Mock
+    ):
+        """When no tile region fields are in data, RDATA_RENDERREGION should not be set."""
+        handler = Cinema4DHandler(mock_map_path)
+        handler.cached_text_was_used_in_previous_frame = False
+
+        mock_doc = Mock()
+        mock_render_data = MagicMock()
+        mock_render_data.GetDataInstance = Mock()
+        mock_doc.GetActiveRenderData.return_value = mock_render_data
+        mock_doc.GetFps.return_value = 30
+        handler.doc = mock_doc
+
+        mock_render_document.return_value = c4d.RENDERRESULT_OK
+
+        with patch.object(handler, "_cache_text_if_needed", return_value=False):
+            handler.start_render({"frame": 1})
+
+        set_keys = [call[0][0] for call in mock_render_data.__setitem__.call_args_list]
+        assert c4d.RDATA_RENDERREGION not in set_keys
+        assert c4d.RDATA_RENDERREGION_LEFT not in set_keys
+
+
 class TestPathmapBaseObject:
     """Tests for the _pathmap_base_object method"""
 
