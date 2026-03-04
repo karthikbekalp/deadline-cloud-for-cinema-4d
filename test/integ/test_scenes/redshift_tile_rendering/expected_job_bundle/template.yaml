@@ -157,10 +157,10 @@ steps:
       type: TEXT
       data: |
         frame: {{Task.Param.Frame}}
-        tile_column: {{Task.Param.TileCol}}
-        tile_row: {{Task.Param.TileRow}}
-        tiles_x: 2
-        tiles_y: 2
+        current_tile_column: {{Task.Param.TileCol}}
+        current_tile_row: {{Task.Param.TileRow}}
+        total_tiles_column: 2
+        total_tiles_row: 2
     actions:
       onRun:
         command: cinema4d-openjd
@@ -237,10 +237,10 @@ steps:
       type: TEXT
       data: |
         frame: {{Task.Param.Frame}}
-        tile_column: {{Task.Param.TileCol}}
-        tile_row: {{Task.Param.TileRow}}
-        tiles_x: 2
-        tiles_y: 2
+        current_tile_column: {{Task.Param.TileCol}}
+        current_tile_row: {{Task.Param.TileRow}}
+        total_tiles_column: 2
+        total_tiles_row: 2
     actions:
       onRun:
         command: cinema4d-openjd
@@ -313,8 +313,8 @@ steps:
       data: |
         frame: {{Task.Param.Frame}}
         assemble_tiles: 'true'
-        tiles_x: 2
-        tiles_y: 2
+        total_tiles_column: 2
+        total_tiles_row: 2
         output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_Main'
         multi_pass_path: ''
     actions:
@@ -389,8 +389,8 @@ steps:
       data: |
         frame: {{Task.Param.Frame}}
         assemble_tiles: 'true'
-        tiles_x: 2
-        tiles_y: 2
+        total_tiles_column: 2
+        total_tiles_row: 2
         output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_A'
         multi_pass_path: ''
     actions:
