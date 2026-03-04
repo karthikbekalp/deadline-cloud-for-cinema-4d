@@ -338,7 +338,9 @@ class Cinema4DHandler:
         # See Maxon SDK open_color_io example: RenderOcioDocumentToPictureViewer.
         requires_baking = rd[c4d.RDATA_FORMATDEPTH] is c4d.RDATA_FORMATDEPTH_8
         orig_bake_flag = None
-        print(f"OCIO: format_depth={rd[c4d.RDATA_FORMATDEPTH]}, requires_baking={requires_baking}, is_tile_render={is_tile_render}")
+        print(
+            f"OCIO: format_depth={rd[c4d.RDATA_FORMATDEPTH]}, requires_baking={requires_baking}, is_tile_render={is_tile_render}"
+        )
         if is_tile_render and requires_baking:
             orig_bake_flag = rd.GetBool(c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER)
             rd[c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER] = False
@@ -384,8 +386,12 @@ class Cinema4DHandler:
         # - For all depths: null display/view profiles to prevent double-application on save
         if is_tile_render:
             format_depth = rd[c4d.RDATA_FORMATDEPTH]
-            print(f"OCIO: tile post-render — format_depth={format_depth}, requires_baking={requires_baking}")
-            print(f"OCIO: RDATA_FORMATDEPTH_8={c4d.RDATA_FORMATDEPTH_8}, match_is={format_depth is c4d.RDATA_FORMATDEPTH_8}, match_eq={format_depth == c4d.RDATA_FORMATDEPTH_8}")
+            print(
+                f"OCIO: tile post-render — format_depth={format_depth}, requires_baking={requires_baking}"
+            )
+            print(
+                f"OCIO: RDATA_FORMATDEPTH_8={c4d.RDATA_FORMATDEPTH_8}, match_is={format_depth is c4d.RDATA_FORMATDEPTH_8}, match_eq={format_depth == c4d.RDATA_FORMATDEPTH_8}"
+            )
             print(f"OCIO: rendered bmp size={bm.GetBw()}x{bm.GetBh()}, bpp={bm.GetBt()}")
 
             # Sample a pixel from the rendered bitmap before any OCIO processing
@@ -401,15 +407,13 @@ class Cinema4DHandler:
                 post_bake_pixel = bm.GetPixel(sample_x, sample_y)
                 print(f"OCIO: post-bake sample pixel ({sample_x},{sample_y}): {post_bake_pixel}")
 
-            bm.SetColorProfile(
-                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE
-            )
-            bm.SetColorProfile(
-                c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM
-            )
+            bm.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE)
+            bm.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM)
             print("OCIO: nulled DISPLAYSPACE and VIEW_TRANSFORM color profiles")
             post_null_pixel = bm.GetPixel(sample_x, sample_y)
-            print(f"OCIO: post-null-profiles sample pixel ({sample_x},{sample_y}): {post_null_pixel}")
+            print(
+                f"OCIO: post-null-profiles sample pixel ({sample_x},{sample_y}): {post_null_pixel}"
+            )
 
             # Determine save bit flags based on format depth
             if format_depth is c4d.RDATA_FORMATDEPTH_16:
@@ -428,7 +432,9 @@ class Cinema4DHandler:
                     f"Failed to crop tile ({tile_col}, {tile_row}) from rendered bitmap"
                 )
             crop_sample = tile_bmp.GetPixel(tile_w // 2, tile_h // 2)
-            print(f"OCIO: cropped tile via GetClonePart — tile size={tile_bmp.GetBw()}x{tile_bmp.GetBh()}, bit depth={tile_bmp.GetBt()}")
+            print(
+                f"OCIO: cropped tile via GetClonePart — tile size={tile_bmp.GetBw()}x{tile_bmp.GetBh()}, bit depth={tile_bmp.GetBt()}"
+            )
             print(f"OCIO: cropped tile center pixel ({tile_w // 2},{tile_h // 2}): {crop_sample}")
 
             # Determine file extension from render format setting
@@ -528,17 +534,19 @@ class Cinema4DHandler:
             inc = 12  # 3 channels * 4 bytes (float)
         elif bpc == 16:
             color_mode = c4d.COLORMODE_RGBw
-            inc = 6   # 3 channels * 2 bytes
+            inc = 6  # 3 channels * 2 bytes
         else:
             color_mode = c4d.COLORMODE_RGB
-            inc = 3   # 3 channels * 1 byte
+            inc = 3  # 3 channels * 1 byte
 
         print(f"[assemble_tiles] bits per channel: {bpc}, color_mode: {color_mode}, inc: {inc}")
 
         # Create the full-resolution output bitmap matching tile bit depth
         final_bmp = c4d.bitmaps.BaseBitmap()
         final_bmp.Init(full_w, full_h, depth=tile_bpp)
-        print(f"[assemble_tiles] final_bmp initialized: {final_bmp.GetBw()}x{final_bmp.GetBh()}, bpp: {final_bmp.GetBt()}")
+        print(
+            f"[assemble_tiles] final_bmp initialized: {final_bmp.GetBw()}x{final_bmp.GetBh()}, bpp: {final_bmp.GetBt()}"
+        )
 
         # Reusable buffer for one row of tile pixels
         row_buffer = bytearray(tile_w * inc)
@@ -567,9 +575,7 @@ class Cinema4DHandler:
                 dst_y = row * tile_h
                 print(f"[assemble_tiles]   writing to dst_x={dst_x}, dst_y={dst_y}")
                 for py in range(tile_h):
-                    tile_bmp.GetPixelCnt(
-                        0, py, tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
-                    )
+                    tile_bmp.GetPixelCnt(0, py, tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0)
                     final_bmp.SetPixelCnt(
                         dst_x, dst_y + py, tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
                     )
@@ -594,7 +600,7 @@ class Cinema4DHandler:
         first_tile_profile = first_tile.GetColorProfile()
         if first_tile_profile is not None:
             final_bmp.SetColorProfile(first_tile_profile)
-            print(f"[assemble_tiles] copied color profile from first tile")
+            print("[assemble_tiles] copied color profile from first tile")
         else:
             final_bmp.SetColorProfile(
                 c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE
@@ -633,7 +639,9 @@ class Cinema4DHandler:
             first_mp = c4d.bitmaps.BaseBitmap()
             mp_result = first_mp.InitWith(first_mp_path)
             if mp_result[0] != c4d.IMAGERESULT_OK:
-                print(f"[assemble_tiles] WARNING: failed to load first multi-pass tile: {first_mp_path}, skipping multi-pass assembly")
+                print(
+                    f"[assemble_tiles] WARNING: failed to load first multi-pass tile: {first_mp_path}, skipping multi-pass assembly"
+                )
             else:
                 mp_full_w = first_mp.GetBw()
                 mp_full_h = first_mp.GetBh()
@@ -657,7 +665,9 @@ class Cinema4DHandler:
                 mp_row_buffer = bytearray(mp_tile_w * mp_inc)
                 mp_row_view = memoryview(mp_row_buffer)
 
-                print(f"[assemble_tiles] assembling multi-pass: {mp_full_w}x{mp_full_h}, tile size: {mp_tile_w}x{mp_tile_h}")
+                print(
+                    f"[assemble_tiles] assembling multi-pass: {mp_full_w}x{mp_full_h}, tile size: {mp_tile_w}x{mp_tile_h}"
+                )
 
                 for row in range(tiles_rows):
                     for col in range(tiles_columns):
@@ -665,7 +675,9 @@ class Cinema4DHandler:
                         mp_tile_bmp = c4d.bitmaps.BaseBitmap()
                         mp_load = mp_tile_bmp.InitWith(mp_tile_path)
                         if mp_load[0] != c4d.IMAGERESULT_OK:
-                            print(f"[assemble_tiles] WARNING: failed to load multi-pass tile: {mp_tile_path}")
+                            print(
+                                f"[assemble_tiles] WARNING: failed to load multi-pass tile: {mp_tile_path}"
+                            )
                             continue
 
                         # Extract the tile region from the full-res multi-pass file
@@ -673,10 +685,22 @@ class Cinema4DHandler:
                         src_y = row * mp_tile_h
                         for py in range(mp_tile_h):
                             mp_tile_bmp.GetPixelCnt(
-                                src_x, src_y + py, mp_tile_w, mp_row_view, mp_inc, mp_color_mode, c4d.PIXELCNT_0
+                                src_x,
+                                src_y + py,
+                                mp_tile_w,
+                                mp_row_view,
+                                mp_inc,
+                                mp_color_mode,
+                                c4d.PIXELCNT_0,
                             )
                             mp_final.SetPixelCnt(
-                                src_x, src_y + py, mp_tile_w, mp_row_view, mp_inc, mp_color_mode, c4d.PIXELCNT_0
+                                src_x,
+                                src_y + py,
+                                mp_tile_w,
+                                mp_row_view,
+                                mp_inc,
+                                mp_color_mode,
+                                c4d.PIXELCNT_0,
                             )
                         print(f"[assemble_tiles] assembled multi-pass tile ({col}, {row})")
 
@@ -692,7 +716,9 @@ class Cinema4DHandler:
 
                 mp_final_filter = ext_to_filter.get(mp_ext.lower(), save_filter)
                 mp_final.Save(mp_final_path, mp_final_filter)
-                print(f"Assembled multi-pass {tiles_columns * tiles_rows} tiles into {mp_final_path}")
+                print(
+                    f"Assembled multi-pass {tiles_columns * tiles_rows} tiles into {mp_final_path}"
+                )
 
         print("Finished Rendering")
 

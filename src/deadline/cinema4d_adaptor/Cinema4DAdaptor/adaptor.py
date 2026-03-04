@@ -535,7 +535,13 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 "Cinema4D exited early and did not render successfully, please check render logs. "
                 f"Exit code {exit_code}"
             )
-    _TILE_KEYS = ("current_tile_column", "current_tile_row", "total_tiles_column", "total_tiles_row")
+
+    _TILE_KEYS = (
+        "current_tile_column",
+        "current_tile_row",
+        "total_tiles_column",
+        "total_tiles_row",
+    )
 
     def _build_start_render_data(self, run_data: dict) -> dict:
         """Build the data dict sent to the start_render action."""
