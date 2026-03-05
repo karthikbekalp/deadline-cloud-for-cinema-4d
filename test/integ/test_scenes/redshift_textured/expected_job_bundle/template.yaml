@@ -105,7 +105,7 @@ steps:
         type: TEXT
         data: |-
           scene_file: '{{Param.Cinema4DFile}}'
-          take: 'Main'
+          take: Main
           output_path: '{{Param.OutputPath}}'
           multi_pass_path: '{{Param.MultiPassPath}}'
           activate_error_checking: '{{Param.ActivateErrorChecking}}'

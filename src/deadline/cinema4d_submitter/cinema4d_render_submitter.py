@@ -488,7 +488,7 @@ def _build_assembly_step(
 
 def _dump_yaml_data(data: dict) -> str:
     """Dump a dict as a YAML string for embedding in job template data fields."""
-    return yaml.dump(data, default_flow_style=False, sort_keys=False, default_style="'").rstrip("\n")
+    return yaml.dump(data, default_flow_style=False, sort_keys=False).rstrip("\n")
 
 
 def get_takes_from_doc(doc: Any) -> dict[str, list[TakeData]]:
