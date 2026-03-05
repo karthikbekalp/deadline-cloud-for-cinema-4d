@@ -255,7 +255,7 @@ def _get_job_template(
             )
 
             init_data = step["stepEnvironments"][0]["script"]["embeddedFiles"][0]
-            init_data["data"] = deadline_yaml_dump(
+            init_data["data"] = _dump_embedded_yaml(
                 {
                     "scene_file": "{{Param.Cinema4DFile}}",
                     "take": take_data.name,
@@ -269,7 +269,7 @@ def _get_job_template(
             # Update run-data to include tile region references when tile rendering is enabled
             if settings.enable_tile_rendering:
                 run_data = step["script"]["embeddedFiles"][0]
-                run_data["data"] = deadline_yaml_dump(
+                run_data["data"] = _dump_embedded_yaml(
                     {
                         "frame": "{{Task.Param.Frame}}",
                         "current_tile_column": "{{Task.Param.TileCol}}",
@@ -469,7 +469,7 @@ def _build_assembly_step(
                     "name": "runData",
                     "filename": "run-data.yaml",
                     "type": "TEXT",
-                    "data": deadline_yaml_dump(
+                    "data": _dump_embedded_yaml(
                         {
                             "frame": "{{Task.Param.Frame}}",
                             "assemble_tiles": "true",
@@ -540,6 +540,22 @@ def get_takes_from_doc(doc: Any) -> dict[str, list[TakeData]]:
         "marked_data_list": marked_data_list,
         "main_data_list": [take_data_list[0]],
     }
+
+# Regex to strip quotes around OpenJD template expressions like {{Task.Param.Frame}}
+_TEMPLATE_EXPR_QUOTES = re.compile(r"'(\{\{[^}]+\}\})'")
+
+
+def _dump_embedded_yaml(data: dict) -> str:
+    """Dump a dict as YAML for embedding in job template data fields.
+
+    Uses deadline_yaml_dump for proper serialization, then strips quotes
+    around OpenJD template expressions (e.g. ``{{Task.Param.Frame}}``) so
+    that resolved numeric values are parsed as numbers, not strings.
+    """
+    result = deadline_yaml_dump(data)
+    return _TEMPLATE_EXPR_QUOTES.sub(r"\1", result)
+
+
 
 
 def save_job_bundle_files(
