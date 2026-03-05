@@ -59,3 +59,28 @@ def inject_tile_identifier(path: str, column: int, row: int) -> str:
     if dot_index == -1:
         return path + suffix
     return path[:dot_index] + suffix + path[dot_index:]
+
+
+def build_tile_task_parameters(tiles_columns: int, tiles_rows: int) -> tuple[list[dict], str]:
+    """
+    Build the task parameter definitions and combination expression for tile rendering.
+
+    Returns a tuple of (parameter_definitions, combination_expression) where
+    parameter_definitions is a list of TileCol/TileRow INT parameter dicts and
+    combination_expression is the parameterSpace combination string.
+    """
+    return (
+        [
+            {
+                "name": "TileCol",
+                "type": "INT",
+                "range": f"0-{tiles_columns - 1}",
+            },
+            {
+                "name": "TileRow",
+                "type": "INT",
+                "range": f"0-{tiles_rows - 1}",
+            },
+        ],
+        "Frame * TileCol * TileRow",
+    )
