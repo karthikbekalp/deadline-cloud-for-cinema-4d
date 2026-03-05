@@ -35,6 +35,7 @@ def main():
     frame_2_end = c4d.BaseTime(2, doc.GetFps())
     render_settings_2[c4d.RDATA_FRAMEFROM] = frame_2_start
     render_settings_2[c4d.RDATA_FRAMETO] = frame_2_end
+    render_settings_2[c4d.RDATA_PATH] = "render's/$prj_$take"
 
     take_a = take_data.AddTake("", main_take, None)
     take_a.SetName("A with '")
