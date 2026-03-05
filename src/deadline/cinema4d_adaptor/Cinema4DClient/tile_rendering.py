@@ -56,6 +56,24 @@ def determine_save_bits(format_depth: int) -> int:
     else:
         return c4d.SAVEBIT_NONE
 
+def create_tile_bitmap(width: int, height: int) -> Any:
+    """Create a MultipassBitmap configured for tile rendering.
+
+    Tile renders need RGBf color mode and an alpha channel to preserve full
+    bit depth for OCIO baking and GetClonePart cropping.
+
+    Args:
+        width: Bitmap width in pixels.
+        height: Bitmap height in pixels.
+
+    Returns:
+        A configured MultipassBitmap ready for tile rendering.
+    """
+    bm = bitmaps.MultipassBitmap(width, height, c4d.COLORMODE_RGBf)
+    bm.AddChannel(True, True)
+    return bm
+
+
 
 @dataclass
 class TileContext:

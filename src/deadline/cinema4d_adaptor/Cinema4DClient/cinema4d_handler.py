@@ -289,16 +289,14 @@ class Cinema4DHandler:
         if is_tile_render:
             tile_ctx = tile_rendering.setup_tile_render(self.render_data, data)
 
-        # Get the live render data instance — modifications here affect the document
-        # directly, which is required for OCIO flags to take effect during rendering.
-        rd = self.render_data.GetDataInstance()
 
-        bm = bitmaps.MultipassBitmap(
-            int(self.render_data[c4d.RDATA_XRES]),
-            int(self.render_data[c4d.RDATA_YRES]),
-            c4d.COLORMODE_RGBf,
-        )
-        bm.AddChannel(True, True)
+        width = int(self.render_data[c4d.RDATA_XRES])
+        height = int(self.render_data[c4d.RDATA_YRES])
+        if is_tile_render:
+            bm = tile_rendering.create_tile_bitmap(width, height)
+        else:
+            bm = bitmaps.MultipassBitmap(width, height, c4d.COLORMODE_RGB)
+        rd = self.render_data.GetDataInstance()
 
         self.cached_text_was_used_in_previous_frame = self._cache_text_if_needed(frame_time)
 

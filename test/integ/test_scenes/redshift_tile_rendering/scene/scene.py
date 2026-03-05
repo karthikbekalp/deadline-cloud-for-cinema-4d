@@ -18,7 +18,7 @@ def main():
     main_take = take_data.GetMainTake()
 
     render_settings_1 = doc.GetActiveRenderData()
-    render_settings_1[c4d.RDATA_PATH] = "render's/$prj_$take"
+    render_settings_1[c4d.RDATA_PATH] = "renders/$prj_$take"
     frame_start = c4d.BaseTime(1, doc.GetFps())
     frame_end = c4d.BaseTime(1, doc.GetFps())
     render_settings_1[c4d.RDATA_FRAMEFROM] = frame_start

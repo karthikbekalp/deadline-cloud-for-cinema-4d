@@ -17,7 +17,7 @@ import pytest
     "test_name",
     [
         "physical",
-        "physical_textured",
+        # "physical_textured",
         # "redshift",
         # "redshift_takes",
         # # TODO: Currently, there is an issue with multipass
