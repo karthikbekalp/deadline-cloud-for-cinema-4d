@@ -2,9 +2,9 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "frame": { "type": "number" },
-      "current_tile_column": { "type": "integer" },
-      "current_tile_row": { "type": "integer" },
+      "frame": { "type": "string" },
+      "current_tile_column": { "type": "string" },
+      "current_tile_row": { "type": "string" },
       "total_tiles_column": { "type": "integer" },
       "total_tiles_row": { "type": "integer" },
       "assemble_tiles": { "type": "string" },
