@@ -542,8 +542,9 @@ def create_job_bundle(
         take.frame_range != first_frame_range for take in submit_takes
     )
 
-    # If there are multiple frame ranges and we're not overriding the range,
-    # then we create per-take Frames parameters.
+    # Deduplicate take names, then generate per-take Frames parameters
+    # if there are multiple frame ranges and we're not overriding the range.
+    deduplicate_take_names(submit_takes)
     if per_take_frames_parameters:
         generate_take_parameter_names(submit_takes)
 
@@ -586,6 +587,84 @@ def create_job_bundle(
     }
 
 
+def _find_duplicate_take_names(submit_takes: list[TakeData]) -> set[str]:
+    """Returns the set of take names that appear more than once."""
+    name_counts: dict[str, int] = {}
+    for take in submit_takes:
+        name_counts[take.name] = name_counts.get(take.name, 0) + 1
+    return {name for name, count in name_counts.items() if count > 1}
+
+
+def deduplicate_take_names(submit_takes: list[TakeData]) -> None:
+    """
+    Checks for duplicate take names and makes them unique by appending
+    _1, _2, etc. suffixes. Handles collisions with existing take names
+    (e.g. 'take', 'take', 'take_1' won't produce two 'take_1' entries).
+    """
+    duplicated_names = _find_duplicate_take_names(submit_takes)
+    if not duplicated_names:
+        return
+
+    _validate_duplicate_name_lengths(duplicated_names)
+
+    all_names = {take.name for take in submit_takes}
+    next_suffix: dict[str, int] = dict.fromkeys(duplicated_names, 1)
+
+    for take in submit_takes:
+        if take.name in next_suffix:
+            new_name, next_start = _generate_unique_name(
+                take.name, next_suffix[take.name], all_names
+            )
+            _apply_take_name(take, new_name)
+            all_names.add(new_name)
+            next_suffix[take.name] = next_start
+
+
+def _validate_duplicate_name_lengths(duplicated_names: set[str]) -> None:
+    """Raises RuntimeError if any duplicated take name is already at the 64-char limit."""
+    for name in duplicated_names:
+        if len(name) >= 64:
+            raise RuntimeError(
+                f"Multiple takes share the name '{name}', which is already 64 characters long. "
+                "Please shorten or rename the duplicate takes so they can be uniquely identified."
+            )
+
+
+def _generate_unique_name(
+    original_name: str, start_suffix: int, existing_names: set[str]
+) -> tuple[str, int]:
+    """Finds the next available suffixed name that doesn't collide with existing names.
+
+    Returns the unique name and the next suffix to try for this original name.
+    """
+    suffix = start_suffix
+    new_name = f"{original_name}_{suffix}"
+    while new_name in existing_names:
+        suffix += 1
+        new_name = f"{original_name}_{suffix}"
+    return new_name, suffix + 1
+
+
+def _apply_take_name(take: TakeData, new_name: str) -> None:
+    """Applies a new name to a take, truncating display_name to 64 characters."""
+    take.name = new_name
+    take.display_name = new_name[:64]
+
+
+def warn_duplicate_take_names(submit_takes: list[TakeData]) -> None:
+    """
+    Checks for duplicate take names and adds a warning via warning_collector
+    if any are found.
+    """
+    duplicated_names = _find_duplicate_take_names(submit_takes)
+    if duplicated_names:
+        renamed_list = ", ".join(f"'{name}'" for name in sorted(duplicated_names))
+        warning_collector.add_warning(
+            f"Duplicate take names were found: {renamed_list}. "
+            "They have been automatically renamed with _1, _2, etc. suffixes to ensure uniqueness."
+        )
+
+
 def generate_take_parameter_names(submit_takes: list[TakeData]) -> None:
     """
     This function generates unique take frame range parameter names
@@ -601,25 +680,13 @@ def generate_take_parameter_names(submit_takes: list[TakeData]) -> None:
     # parameter names must only contain letters, numbers, or underscores
     removed_job_parameter_chars = re.compile("[^a-zA-Z0-9_]")
 
-    take_names = set()
     parameter_names = set()
 
     for take_number in range(len(submit_takes)):
         take_data = submit_takes[take_number]
-
-        # First, check for duplicate take names since this will result in overwriting files in the output
-        # or other unexpected behaviour
-        # We do this here rather than earlier in submission because we get an error popup
-        # (rather than a quieter console error) for errors here.
         take_name = take_data.name
-        if take_name in take_names:
-            raise RuntimeError(
-                f"You have multiple takes named '{take_name}' with different render settings among the takes. "
-                "Please use unique take names."
-            )
-        take_names.add(take_name)
 
-        # Now, determine the frame parameter name
+        # determine the frame parameter name
         # remove all disallowed characters
         parameter_name = removed_job_parameter_chars.sub("", take_data.display_name)[
             : 64 - len("Frames")
@@ -834,6 +901,9 @@ def _show_submitter(temp_dir: str, parent=None, f=Qt.WindowFlags()):
         """
         Callback function for creating a job bundle when submitting the job.
         """
+        submit_takes = get_submit_takes(settings, takes)
+        warn_duplicate_take_names(submit_takes)
+
         check_take_token_warnings(settings, takes)
 
         if warning_collector.has_warnings():
