@@ -37,7 +37,7 @@ def main():
     render_settings_2[c4d.RDATA_FRAMETO] = frame_2_end
 
     take_a = take_data.AddTake("", main_take, None)
-    take_a.SetName("A")
+    take_a.SetName("it's A")
     take_a.SetRenderData(take_data, render_settings_2)
 
     take_data.SetCurrentTake(main_take)

@@ -85,12 +85,12 @@ parameterDefinitions:
     groupLabel: Take Main Settings (redshift renderer)
   description: The frames to render. E.g. 1-3,8,11-15
   minLength: 1
-- name: AFrames
+- name: itsAFrames
   type: STRING
   userInterface:
     control: LINE_EDIT
     label: Frames
-    groupLabel: Take A Settings (redshift renderer)
+    groupLabel: Take it's A Settings (redshift renderer)
   description: The frames to render. E.g. 1-3,8,11-15
   minLength: 1
 steps:
@@ -174,12 +174,12 @@ steps:
         cancelation:
           mode: NOTIFY_THEN_TERMINATE
         timeout: 172800
-- name: A
+- name: it's A
   parameterSpace:
     taskParameterDefinitions:
     - name: Frame
       type: INT
-      range: '{{Param.AFrames}}'
+      range: '{{Param.itsAFrames}}'
     - name: TileCol
       type: INT
       range: 0-1
@@ -200,8 +200,8 @@ steps:
         type: TEXT
         data: |-
           scene_file: '{{Param.Cinema4DFile}}'
-          take: 'A'
-          output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_A'
+          take: 'it''s A'
+          output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_it''s_A'
           multi_pass_path: ''
           activate_error_checking: '{{Param.ActivateErrorChecking}}'
           use_cached_text: '{{Param.UseCachedText}}'
@@ -330,14 +330,14 @@ steps:
         cancelation:
           mode: NOTIFY_THEN_TERMINATE
         timeout: 172800
-- name: A - Assemble Tiles
+- name: it's A - Assemble Tiles
   dependencies:
-  - dependsOn: A
+  - dependsOn: it's A
   parameterSpace:
     taskParameterDefinitions:
     - name: Frame
       type: INT
-      range: '{{Param.AFrames}}'
+      range: '{{Param.itsAFrames}}'
   stepEnvironments:
   - name: Cinema4D
     description: Runs Cinema4D in the background.
@@ -351,8 +351,8 @@ steps:
         type: TEXT
         data: |-
           scene_file: '{{Param.Cinema4DFile}}'
-          take: 'A'
-          output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_A'
+          take: 'it''s A'
+          output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_it''s_A'
           multi_pass_path: ''
           activate_error_checking: '{{Param.ActivateErrorChecking}}'
           use_cached_text: '{{Param.UseCachedText}}'
@@ -391,7 +391,7 @@ steps:
         assemble_tiles: 'true'
         total_tiles_column: 2
         total_tiles_row: 2
-        output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_A'
+        output_path: 'PATH_TO_BE_REPLACED\deadline-cloud-for-cinema-4d\test\integ\test_scenes\redshift_tile_rendering\generated_bundle\renders\redshift_tile_rendering_it''s_A'
         multi_pass_path: ''
     actions:
       onRun:
