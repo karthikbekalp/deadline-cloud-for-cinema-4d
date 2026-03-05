@@ -196,12 +196,14 @@ class SceneSettingsWidget(QWidget):
         tile_layout.addWidget(QLabel("Columns"), 1, 0)
         self.tiles_columns_spin = QSpinBox(self)
         self.tiles_columns_spin.setMinimum(1)
+        self.tiles_columns_spin.setMaximum(5)  # We see negative performance gains for values >5.
         self.tiles_columns_spin.setValue(2)
         tile_layout.addWidget(self.tiles_columns_spin, 1, 1)
 
         tile_layout.addWidget(QLabel("Rows"), 2, 0)
         self.tiles_rows_spin = QSpinBox(self)
         self.tiles_rows_spin.setMinimum(1)
+        self.tiles_rows_spin.setMaximum(5)  # We see negative performance gains for values >5.
         self.tiles_rows_spin.setValue(2)
         tile_layout.addWidget(self.tiles_rows_spin, 2, 1)
 
