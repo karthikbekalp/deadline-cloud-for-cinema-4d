@@ -52,7 +52,11 @@ def main():
     c4d.EventAdd()
 
     internal_create_job_bundle(
-        save_dir, take_selection=TakeSelection.ALL, enable_tile_rendering=True, tiles_columns=2, tiles_rows=2
+        save_dir,
+        take_selection=TakeSelection.ALL,
+        enable_tile_rendering=True,
+        tiles_columns=2,
+        tiles_rows=2,
     )
 
 

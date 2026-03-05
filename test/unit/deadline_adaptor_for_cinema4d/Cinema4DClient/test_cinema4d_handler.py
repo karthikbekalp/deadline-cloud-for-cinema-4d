@@ -755,7 +755,10 @@ class TestStartRenderTileRegion:
     @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.bitmaps.MultipassBitmap")
     @patch("deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler.c4d.BaseTime")
     def test_start_render_sets_render_region_when_tile_data_present(
-        self, mock_base_time: Mock, mock_bitmap: Mock, mock_render_document: Mock,
+        self,
+        mock_base_time: Mock,
+        mock_bitmap: Mock,
+        mock_render_document: Mock,
         mock_base_bitmap: Mock,
     ):
         """When total_tiles_column is in data, RDATA_RENDERREGION should be set to True
@@ -767,13 +770,15 @@ class TestStartRenderTileRegion:
         mock_render_data = MagicMock()
         mock_render_data.GetDataInstance = Mock()
         # Simulate 100x100 resolution
-        mock_render_data.__getitem__ = Mock(side_effect=lambda k: {
-            c4d.RDATA_XRES: 100,
-            c4d.RDATA_YRES: 100,
-            c4d.RDATA_PATH: "",
-            c4d.RDATA_MULTIPASS_SAVEIMAGE: False,
-            c4d.RDATA_MULTIPASS_FILENAME: "",
-        }.get(k, 0))
+        mock_render_data.__getitem__ = Mock(
+            side_effect=lambda k: {
+                c4d.RDATA_XRES: 100,
+                c4d.RDATA_YRES: 100,
+                c4d.RDATA_PATH: "",
+                c4d.RDATA_MULTIPASS_SAVEIMAGE: False,
+                c4d.RDATA_MULTIPASS_FILENAME: "",
+            }.get(k, 0)
+        )
         mock_doc.GetActiveRenderData.return_value = mock_render_data
         mock_doc.GetFps.return_value = 30
         handler.doc = mock_doc

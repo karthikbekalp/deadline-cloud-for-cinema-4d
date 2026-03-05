@@ -294,8 +294,7 @@ def _get_job_template(
                     "current_tile_column: {{Task.Param.TileCol}}\n"
                     "current_tile_row: {{Task.Param.TileRow}}\n"
                     "total_tiles_column: %d\n"
-                    "total_tiles_row: %d\n"
-                    % (tiles_columns, tiles_rows)
+                    "total_tiles_row: %d\n" % (tiles_columns, tiles_rows)
                 )
 
     # Add tile assembly steps (one per render step) when tile rendering is enabled
@@ -313,7 +312,9 @@ def _get_job_template(
             if has_take_token and idx < len(takes):
                 take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", takes[idx].name)
                 assembly_output_path = settings.output_path.replace("$take", take_name_for_path)
-                assembly_multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
+                assembly_multi_pass_path = settings.multi_pass_path.replace(
+                    "$take", take_name_for_path
+                )
             else:
                 assembly_output_path = "{{Param.OutputPath}}"
                 assembly_multi_pass_path = "{{Param.MultiPassPath}}"
@@ -340,7 +341,12 @@ def _get_job_template(
                                 "total_tiles_row: %d\n"
                                 "output_path: '%s'\n"
                                 "multi_pass_path: '%s'\n"
-                                % (tiles_columns, tiles_rows, assembly_output_path, assembly_multi_pass_path)
+                                % (
+                                    tiles_columns,
+                                    tiles_rows,
+                                    assembly_output_path,
+                                    assembly_multi_pass_path,
+                                )
                             ),
                         }
                     ],
