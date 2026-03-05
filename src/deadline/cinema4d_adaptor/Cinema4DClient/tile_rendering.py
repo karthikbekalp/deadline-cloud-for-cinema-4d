@@ -122,16 +122,20 @@ def setup_tile_render(
     tile_w = full_w // tiles_columns
     tile_h = full_h // tiles_rows
 
+    # Pixel coordinates of the tile region (absolute, for cropping later)
     region_left = tile_col * tile_w
     region_top = tile_row * tile_h
     region_right = region_left + tile_w
     region_bottom = region_top + tile_h
 
+    # C4D's RDATA_RENDERREGION_* values are offsets inward from each edge,
+    # NOT absolute pixel coordinates.  For example RIGHT=0 means "render up
+    # to the right edge" and BOTTOM=0 means "render down to the bottom edge".
     render_data[c4d.RDATA_RENDERREGION] = True
     render_data[c4d.RDATA_RENDERREGION_LEFT] = region_left
     render_data[c4d.RDATA_RENDERREGION_TOP] = region_top
-    render_data[c4d.RDATA_RENDERREGION_RIGHT] = region_right
-    render_data[c4d.RDATA_RENDERREGION_BOTTOM] = region_bottom
+    render_data[c4d.RDATA_RENDERREGION_RIGHT] = full_w - region_right
+    render_data[c4d.RDATA_RENDERREGION_BOTTOM] = full_h - region_bottom
 
     # Save original output paths — we clear RDATA_PATH so C4D doesn't save the
     # full-resolution beauty image (we crop and save it manually).
