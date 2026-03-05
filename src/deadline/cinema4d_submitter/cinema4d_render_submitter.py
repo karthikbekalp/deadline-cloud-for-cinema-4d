@@ -255,28 +255,30 @@ def _get_job_template(
             )
 
             init_data = step["stepEnvironments"][0]["script"]["embeddedFiles"][0]
-            init_data["data"] = _dump_yaml_data(
-                {
-                    "scene_file": "{{Param.Cinema4DFile}}",
-                    "take": take_data.name,
-                    "output_path": output_path,
-                    "multi_pass_path": multi_pass_path,
-                    "activate_error_checking": "{{Param.ActivateErrorChecking}}",
-                    "use_cached_text": "{{Param.UseCachedText}}",
-                }
+            init_data["data"] = (
+                "scene_file: '{{Param.Cinema4DFile}}'\n"
+                "take: '%s'\n"
+                "output_path: '%s'\n"
+                "multi_pass_path: '%s'\n"
+                "activate_error_checking: '{{Param.ActivateErrorChecking}}'\n"
+                "use_cached_text: '{{Param.UseCachedText}}'"
+                % (
+                    take_data.name.replace("'", "''"),
+                    output_path.replace("'", "''"),
+                    multi_pass_path.replace("'", "''"),
+                )
             )
 
             # Update run-data to include tile region references when tile rendering is enabled
             if settings.enable_tile_rendering:
                 run_data = step["script"]["embeddedFiles"][0]
-                run_data["data"] = _dump_yaml_data(
-                    {
-                        "frame": "{{Task.Param.Frame}}",
-                        "current_tile_column": "{{Task.Param.TileCol}}",
-                        "current_tile_row": "{{Task.Param.TileRow}}",
-                        "total_tiles_column": settings.tiles_columns,
-                        "total_tiles_row": settings.tiles_rows,
-                    }
+                run_data["data"] = (
+                    "frame: {{Task.Param.Frame}}\n"
+                    "current_tile_column: {{Task.Param.TileCol}}\n"
+                    "current_tile_row: {{Task.Param.TileRow}}\n"
+                    "total_tiles_column: %d\n"
+                    "total_tiles_row: %d\n"
+                    % (settings.tiles_columns, settings.tiles_rows)
                 )
 
     # Add tile assembly steps (one per render step) when tile rendering is enabled
@@ -469,26 +471,25 @@ def _build_assembly_step(
                     "name": "runData",
                     "filename": "run-data.yaml",
                     "type": "TEXT",
-                    "data": _dump_yaml_data(
-                        {
-                            "frame": "{{Task.Param.Frame}}",
-                            "assemble_tiles": "true",
-                            "total_tiles_column": settings.tiles_columns,
-                            "total_tiles_row": settings.tiles_rows,
-                            "output_path": output_path,
-                            "multi_pass_path": multi_pass_path,
-                        }
+                    "data": (
+                        "frame: {{Task.Param.Frame}}\n"
+                        "assemble_tiles: 'true'\n"
+                        "total_tiles_column: %d\n"
+                        "total_tiles_row: %d\n"
+                        "output_path: '%s'\n"
+                        "multi_pass_path: '%s'\n"
+                        % (
+                            settings.tiles_columns,
+                            settings.tiles_rows,
+                            output_path.replace("'", "''"),
+                            multi_pass_path.replace("'", "''"),
+                        )
                     ),
                 }
             ],
             "actions": deepcopy(render_step["script"]["actions"]),
         },
     }
-
-
-def _dump_yaml_data(data: dict) -> str:
-    """Dump a dict as a YAML string for embedding in job template data fields."""
-    return yaml.dump(data, default_flow_style=False, sort_keys=False).rstrip("\n")
 
 
 def get_takes_from_doc(doc: Any) -> dict[str, list[TakeData]]:
