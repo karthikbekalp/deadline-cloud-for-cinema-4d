@@ -85,8 +85,6 @@ class TileContext:
     tiles_rows: int
     tile_w: int
     tile_h: int
-    full_w: int
-    full_h: int
     region_left: int
     region_top: int
     region_right: int
@@ -134,11 +132,6 @@ def setup_tile_render(
     render_data[c4d.RDATA_RENDERREGION_TOP] = region_top
     render_data[c4d.RDATA_RENDERREGION_RIGHT] = region_right
     render_data[c4d.RDATA_RENDERREGION_BOTTOM] = region_bottom
-    print(
-        f"Tile setup: tile=({tile_col},{tile_row}), grid={tiles_columns}x{tiles_rows}, "
-        f"full_res={full_w}x{full_h}, tile_size={tile_w}x{tile_h}, "
-        f"region=({region_left},{region_top})-({region_right},{region_bottom})"
-    )
 
     # Save original output paths — we clear RDATA_PATH so C4D doesn't save the
     # full-resolution beauty image (we crop and save it manually).
@@ -181,8 +174,6 @@ def setup_tile_render(
         tiles_rows=tiles_rows,
         tile_w=tile_w,
         tile_h=tile_h,
-        full_w=full_w,
-        full_h=full_h,
         region_left=region_left,
         region_top=region_top,
         region_right=region_right,
@@ -226,8 +217,8 @@ def finalize_tile_render(
     print(f"OCIO: rendered bmp size={bm.GetBw()}x{bm.GetBh()}, bpp={bm.GetBt()}")
 
     # Sample a pixel from the rendered bitmap before any OCIO processing
-    sample_x = ctx.tile_w // 2
-    sample_y = ctx.tile_h // 2
+    sample_x = ctx.region_left + ctx.tile_w // 2
+    sample_y = ctx.region_top + ctx.tile_h // 2
     pre_bake_pixel = bm.GetPixel(sample_x, sample_y)
     print(f"OCIO: pre-bake sample pixel ({sample_x},{sample_y}): {pre_bake_pixel}")
 
@@ -244,9 +235,13 @@ def finalize_tile_render(
     post_null_pixel = bm.GetPixel(sample_x, sample_y)
     print(f"OCIO: post-null-profiles sample pixel ({sample_x},{sample_y}): {post_null_pixel}")
 
-    # The bitmap is already tile-sized (rendered at tile resolution), so use it
-    # directly instead of cropping.
-    tile_bmp = bm
+    # Crop the tile region from the full bitmap using GetClonePart to preserve
+    # bit depth and float data (GetPixel/SetPixel truncates to 8-bit integers).
+    tile_bmp = bm.GetClonePart(ctx.region_left, ctx.region_top, ctx.tile_w, ctx.tile_h)
+    if tile_bmp is None:
+        raise RuntimeError(
+            f"Failed to crop tile ({ctx.tile_col}, {ctx.tile_row}) from rendered bitmap"
+        )
     crop_sample = tile_bmp.GetPixel(ctx.tile_w // 2, ctx.tile_h // 2)
     print(
         f"OCIO: cropped tile via GetClonePart — tile size={tile_bmp.GetBw()}x{tile_bmp.GetBh()}, bit depth={tile_bmp.GetBt()}"
@@ -281,11 +276,6 @@ def finalize_tile_render(
         render_data[c4d.RDATA_PATH] = ctx.tile_output_path
     if ctx.tile_multipass_path:
         render_data[c4d.RDATA_MULTIPASS_FILENAME] = ctx.tile_multipass_path
-
-    # Restore full resolution so subsequent tile renders compute correct regions
-    render_data[c4d.RDATA_XRES] = ctx.full_w
-    render_data[c4d.RDATA_YRES] = ctx.full_h
-    print(f"Tile finalize: restored RDATA_XRES={ctx.full_w}, RDATA_YRES={ctx.full_h}")
 
 
 def _assemble_beauty_tiles(

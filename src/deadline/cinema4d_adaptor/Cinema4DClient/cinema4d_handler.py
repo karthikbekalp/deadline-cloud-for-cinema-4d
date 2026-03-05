@@ -290,19 +290,11 @@ class Cinema4DHandler:
             tile_ctx = tile_rendering.setup_tile_render(self.render_data, data)
 
 
-        if is_tile_render and tile_ctx is not None:
-            width = tile_ctx.tile_w
-            height = tile_ctx.tile_h
-            self.render_data[c4d.RDATA_XRES] = width
-            self.render_data[c4d.RDATA_YRES] = height
+        width = int(self.render_data[c4d.RDATA_XRES])
+        height = int(self.render_data[c4d.RDATA_YRES])
+        if is_tile_render:
             bm = tile_rendering.create_tile_bitmap(width, height)
-            print(
-                f"Tile render: set RDATA_XRES={width}, RDATA_YRES={height}, "
-                f"bitmap={width}x{height}"
-            )
         else:
-            width = int(self.render_data[c4d.RDATA_XRES])
-            height = int(self.render_data[c4d.RDATA_YRES])
             bm = bitmaps.MultipassBitmap(width, height, c4d.COLORMODE_RGB)
         rd = self.render_data.GetDataInstance()
 
