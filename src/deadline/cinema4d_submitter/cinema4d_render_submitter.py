@@ -272,6 +272,7 @@ def _get_job_template(
                 run_data["data"] = deadline_yaml_dump(
                     {
                         "frame": "{{Task.Param.Frame}}",
+                        "tile_action": "render",
                         "current_tile_column": "{{Task.Param.TileCol}}",
                         "current_tile_row": "{{Task.Param.TileRow}}",
                         "total_tiles_column": settings.tiles_columns,
@@ -472,7 +473,7 @@ def _build_assembly_step(
                     "data": deadline_yaml_dump(
                         {
                             "frame": "{{Task.Param.Frame}}",
-                            "assemble_tiles": "true",
+                            "tile_action": "assemble",
                             "total_tiles_column": settings.tiles_columns,
                             "total_tiles_row": settings.tiles_rows,
                             "output_path": output_path,

@@ -39,7 +39,7 @@ REFERENCE_RUN_DATA_SCHEMA = {
         "current_tile_row": {"type": "integer"},
         "total_tiles_column": {"type": "integer"},
         "total_tiles_row": {"type": "integer"},
-        "assemble_tiles": {"type": "string"},
+        "tile_action": {"type": "string", "enum": ["render", "assemble"]},
         "output_path": {"type": "string"},
         "multi_pass_path": {"type": "string"},
     },

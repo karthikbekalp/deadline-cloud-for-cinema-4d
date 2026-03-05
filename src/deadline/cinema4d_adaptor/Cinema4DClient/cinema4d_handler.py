@@ -279,7 +279,8 @@ class Cinema4DHandler:
         # Tile data arrives as grid coordinates (current_tile_column, current_tile_row,
         # total_tiles_column, total_tiles_row).
         # We compute the normalized region and convert to pixel coordinates.
-        is_tile_render = "total_tiles_column" in data
+        tile_action = data.get("tile_action", "")
+        is_tile_render = tile_action == "render"
         tile_output_path = ""
         if is_tile_render:
             tiles_columns = int(data["total_tiles_column"])

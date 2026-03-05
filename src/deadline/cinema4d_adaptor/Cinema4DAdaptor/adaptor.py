@@ -514,8 +514,9 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
             if name in run_data:
                 self._action_queue.enqueue_action(Action(name, {name: run_data[name]}))
 
-        # Dispatch either tile assembly or render
-        if run_data.get("assemble_tiles"):
+        # Dispatch based on tile_action: "assemble", "render" (tile), or absent (normal)
+        tile_action = run_data.get("tile_action")
+        if tile_action == "assemble":
             assemble_data = self._build_assemble_tiles_data(run_data)
             self._action_queue.enqueue_action(Action("assemble_tiles", assemble_data))
         else:
@@ -546,6 +547,8 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
     def _build_start_render_data(self, run_data: dict) -> dict:
         """Build the data dict sent to the start_render action."""
         data: dict = {"frame": run_data["frame"]}
+        if run_data.get("tile_action") == "render":
+            data["tile_action"] = "render"
         for key in self._TILE_KEYS:
             if key in run_data:
                 # OpenJD step parameters arrive as strings; cast to int for the renderer.
