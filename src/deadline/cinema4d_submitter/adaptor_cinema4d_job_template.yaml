@@ -139,7 +139,7 @@ steps:
       filename: run-data.yaml
       type: TEXT
       data: |
-        frame: {{Task.Param.Frame}}
+        frame: '{{Task.Param.Frame}}'
     actions:
       onRun:
         command: cinema4d-openjd

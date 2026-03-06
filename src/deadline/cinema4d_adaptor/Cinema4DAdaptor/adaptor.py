@@ -119,7 +119,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
 
     @property
     def integration_data_interface_version(self) -> SemanticVersion:
-        return SemanticVersion(major=0, minor=3)
+        return SemanticVersion(major=0, minor=4)
 
     @staticmethod
     def _get_timer(timeout: int | float) -> Callable[[], bool]:
@@ -514,7 +514,14 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
             if name in run_data:
                 self._action_queue.enqueue_action(Action(name, {name: run_data[name]}))
 
-        self._action_queue.enqueue_action(Action("start_render", {"frame": run_data["frame"]}))
+        # Dispatch based on tile_action: "assemble", "render" (tile), or absent (normal)
+        tile_action = run_data.get("tile_action")
+        if tile_action == "assemble":
+            assemble_data = self._build_assemble_tiles_data(run_data)
+            self._action_queue.enqueue_action(Action("assemble_tiles", assemble_data))
+        else:
+            start_render_data = self._build_start_render_data(run_data)
+            self._action_queue.enqueue_action(Action("start_render", start_render_data))
 
         while self._cinema4d_is_rendering and not self._has_exception:
             time.sleep(0.1)  # busy wait so that on_cleanup is not called
@@ -529,6 +536,35 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 "Cinema4D exited early and did not render successfully, please check render logs. "
                 f"Exit code {exit_code}"
             )
+
+    _TILE_KEYS = (
+        "current_tile_column",
+        "current_tile_row",
+        "total_tiles_column",
+        "total_tiles_row",
+    )
+
+    def _build_start_render_data(self, run_data: dict) -> dict:
+        """Build the data dict sent to the start_render action."""
+        data: dict = {"frame": run_data["frame"]}
+        if run_data.get("tile_action") == "render":
+            data["tile_action"] = "render"
+        for key in self._TILE_KEYS:
+            if key in run_data:
+                # OpenJD step parameters arrive as strings; cast to int for the renderer.
+                data[key] = int(run_data[key])
+        return data
+
+    def _build_assemble_tiles_data(self, run_data: dict) -> dict:
+        """Build the data dict sent to the assemble_tiles action."""
+        return {
+            "frame": run_data["frame"],
+            # OpenJD step parameters arrive as strings; cast to int for the renderer.
+            "total_tiles_column": int(run_data["total_tiles_column"]),
+            "total_tiles_row": int(run_data["total_tiles_row"]),
+            "output_path": run_data.get("output_path", ""),
+            "multi_pass_path": run_data.get("multi_pass_path", ""),
+        }
 
     def on_stop(self) -> None:
         """ """
