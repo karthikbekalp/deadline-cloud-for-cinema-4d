@@ -37,9 +37,12 @@ from .scene import Animation, Scene
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
+from .tile_utils import build_assembly_step, build_tile_task_parameters
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
+
+_TAKE_TOKEN = "$take"
 
 
 def _get_release_date() -> Optional[str]:
@@ -236,29 +239,57 @@ def _get_job_template(
                 "{{Param." + take_data.frames_parameter_name + "}}"
             )
 
+        # Add tile parameters when tile rendering is enabled
+        if settings.enable_tile_rendering:
+            tile_params, combination = build_tile_task_parameters(
+                settings.tiles_columns, settings.tiles_rows
+            )
+            parameter_space["taskParameterDefinitions"].extend(tile_params)
+            parameter_space["combination"] = combination
+
         if adaptor is False:
             variables = step["stepEnvironments"][0]["variables"]
             variables["TAKE"] = take_data.name
         else:
-            # Update the init data of the step
-            init_data = step["stepEnvironments"][0]["script"]["embeddedFiles"][0]
+            # Resolve output paths: use $take-substituted paths or parameter references
+            output_path, multi_pass_path = _resolve_take_paths(
+                settings, take_data.name, has_take_token
+            )
 
-            if has_take_token:
-                # Replace $take token with sanitized take name for file path safety
-                # Use original name (not truncated display_name) but sanitize it
-                take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_data.name)
-                output_path = settings.output_path.replace("$take", take_name_for_path)
-                multi_pass_path = settings.multi_pass_path.replace("$take", take_name_for_path)
-                init_data["data"] = (
-                    "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '%s'\nmulti_pass_path: '%s'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
-                    % (take_data.name, output_path, multi_pass_path)
+            init_data = step["stepEnvironments"][0]["script"]["embeddedFiles"][0]
+            init_data["data"] = deadline_yaml_dump(
+                {
+                    "scene_file": "{{Param.Cinema4DFile}}",
+                    "take": take_data.name,
+                    "output_path": output_path,
+                    "multi_pass_path": multi_pass_path,
+                    "activate_error_checking": "{{Param.ActivateErrorChecking}}",
+                    "use_cached_text": "{{Param.UseCachedText}}",
+                }
+            )
+
+            # Update run-data to include tile region references when tile rendering is enabled
+            if settings.enable_tile_rendering:
+                run_data = step["script"]["embeddedFiles"][0]
+                run_data["data"] = deadline_yaml_dump(
+                    {
+                        "frame": "{{Task.Param.Frame}}",
+                        "tile_action": "render",
+                        "current_tile_column": "{{Task.Param.TileCol}}",
+                        "current_tile_row": "{{Task.Param.TileRow}}",
+                        "total_tiles_column": settings.tiles_columns,
+                        "total_tiles_row": settings.tiles_rows,
+                    }
                 )
-            else:
-                # Use parameter references for paths without $take token
-                init_data["data"] = (
-                    "scene_file: '{{Param.Cinema4DFile}}'\ntake: '%s'\noutput_path: '{{Param.OutputPath}}'\nmulti_pass_path: '{{Param.MultiPassPath}}'\nactivate_error_checking: '{{Param.ActivateErrorChecking}}'\nuse_cached_text: '{{Param.UseCachedText}}'"
-                    % take_data.name
-                )
+
+    # Add tile assembly steps (one per render step) when tile rendering is enabled
+    if settings.enable_tile_rendering and adaptor:
+        render_steps = list(job_template["steps"])
+        for idx, render_step in enumerate(render_steps):
+            take_name = takes[idx].name
+            output_path, multi_pass_path = _resolve_take_paths(settings, take_name, has_take_token)
+            assembly_step = build_assembly_step(render_step, settings, output_path, multi_pass_path)
+            job_template["steps"].append(assembly_step)
 
     # If Arnold is one of the renderers, add Arnold-specific parameters
     if "arnold" in renderers:
@@ -404,6 +435,21 @@ def initialize_render_settings() -> RenderSubmitterUISettings:
 _STRIPPED_PATH_CHARS = re.compile(r"[|:()\* ]")
 
 
+def _resolve_take_paths(
+    settings: RenderSubmitterUISettings,
+    take_name: Optional[str],
+    has_take_token: bool,
+) -> tuple[str, str]:
+    """Resolve output_path and multi_pass_path, substituting $take if present."""
+    if has_take_token and take_name is not None:
+        take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_name)
+        return (
+            settings.output_path.replace(_TAKE_TOKEN, take_name_for_path),
+            settings.multi_pass_path.replace(_TAKE_TOKEN, take_name_for_path),
+        )
+    return "{{Param.OutputPath}}", "{{Param.MultiPassPath}}"
+
+
 def get_takes_from_doc(doc: Any) -> dict[str, list[TakeData]]:
     """
     Extracts and organizes take data from the given Cinema 4D document.
@@ -515,7 +561,9 @@ def create_job_bundle(
     multi_pass_before = (
         settings.multi_pass_path if settings.override_multi_pass_path else scene_multi_pass_path
     )
-    has_take_token = "$take" in (output_path_before or "") or "$take" in (multi_pass_before or "")
+    has_take_token = _TAKE_TOKEN in (output_path_before or "") or _TAKE_TOKEN in (
+        multi_pass_before or ""
+    )
 
     # Add overrides to asset references and update the paths with C4D render path tokens.
     if settings.override_output_path:
@@ -780,13 +828,13 @@ def check_take_token_warnings(
     submit_takes = get_submit_takes(settings, takes)
     if len(submit_takes) == 1:
         return
-    if "$take" in settings.output_path:
+    if _TAKE_TOKEN in settings.output_path:
         return
-    if "$take" in settings.multi_pass_path:
+    if _TAKE_TOKEN in settings.multi_pass_path:
         return
     warning_collector.add_warning(
-        "Multiple takes are selected but output paths do not contain the $take token. "
-        "This will cause different takes to overwrite each other. Use $take in your path to avoid this."
+        f"Multiple takes are selected but output paths do not contain the {_TAKE_TOKEN} token. "
+        f"This will cause different takes to overwrite each other. Use {_TAKE_TOKEN} in your path to avoid this."
     )
 
 

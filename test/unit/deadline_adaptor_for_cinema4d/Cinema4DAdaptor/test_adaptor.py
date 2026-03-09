@@ -33,7 +33,16 @@ REFERENCE_INIT_DATA_SCHEMA = {
 REFERENCE_RUN_DATA_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
-    "properties": {"frame": {"type": "number"}},
+    "properties": {
+        "frame": {"type": "string"},
+        "current_tile_column": {"type": "string"},
+        "current_tile_row": {"type": "string"},
+        "total_tiles_column": {"type": "integer"},
+        "total_tiles_row": {"type": "integer"},
+        "tile_action": {"type": "string", "enum": ["render", "assemble"]},
+        "output_path": {"type": "string"},
+        "multi_pass_path": {"type": "string"},
+    },
     "required": ["frame"],
 }
 
@@ -167,7 +176,7 @@ def test_if_init_data_and_run_data_schema_are_changed_schema_version_is_bumped(i
     """
     # Expected version for these reference schemas
     EXPECTED_MAJOR = 0
-    EXPECTED_MINOR = 3
+    EXPECTED_MINOR = 4
 
     # Get the current version from the adaptor
     adapter = Cinema4DAdaptor(init_data)
@@ -268,7 +277,7 @@ def test_activate_error_checking(init_data: dict, activate_error_checking: int) 
 
 @pytest.fixture()
 def run_data() -> dict:
-    return {"frame": 42}
+    return {"frame": "42"}
 
 
 @pytest.mark.xdist_group(name="adaptor_tests")
