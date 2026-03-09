@@ -6,13 +6,7 @@
 
 ### Bug Fixes
 * auto-deduplicate duplicate take names instead of raising an error (#399) ([`dc46680`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/dc46680a057d2a2af9fcd1141981e7b86e8d7643))
-* auto-deduplicate duplicate take names instead of raising an error ([`dc46680`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/dc46680a057d2a2af9fcd1141981e7b86e8d7643))
 * warn on .rs file detection and add FAQ for nested Redshift proxy files (#396) ([`a190402`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/a19040223eab76b32600d5594e2df91bd2e00251))
-* warn on .rs file detection and add FAQ for nested Redshift proxy handling ([`a190402`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/a19040223eab76b32600d5594e2df91bd2e00251))
-* Upgrade Python to >= 3.10 as 3.9 is EoL. (#384) ([`b4b8fc3`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/b4b8fc343d5799d1e94744339518fc89d7676d68))
-* update integ tests for token multi-take output paths (#378) ([`30d8578`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/30d85781abad959d7bc1fca7a6e94eaa13c7c4b7))
-* update integ tests for token multi-take output paths ([`30d8578`](https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/commit/30d85781abad959d7bc1fca7a6e94eaa13c7c4b7))
-
 
 ## 0.9.2 (2025-12-18)
 
