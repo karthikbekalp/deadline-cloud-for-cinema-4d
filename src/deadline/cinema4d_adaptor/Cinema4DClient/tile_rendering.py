@@ -26,10 +26,12 @@ FORMAT_MAP = {
 
 EXT_TO_FILTER = {v[0]: v[1] for v in FORMAT_MAP.values()}
 
+DEFAULT_FORMAT = FORMAT_MAP[c4d.FILTER_PNG]
+
 
 def get_format_info(format_id: int) -> tuple[str, int]:
     """Return (extension, save_filter) for a C4D render format ID."""
-    return FORMAT_MAP.get(format_id, (".png", c4d.FILTER_PNG))
+    return FORMAT_MAP.get(format_id, DEFAULT_FORMAT)
 
 
 def determine_color_mode(bpp: int) -> tuple[int, int]:
