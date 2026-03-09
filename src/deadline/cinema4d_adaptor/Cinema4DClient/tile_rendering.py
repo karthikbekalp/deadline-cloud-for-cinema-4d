@@ -261,6 +261,95 @@ def finalize_tile_render(
         render_data[c4d.RDATA_MULTIPASS_FILENAME] = ctx.tile_multipass_path
 
 
+def _load_tile_bitmap(tile_path: str, pass_label: str, is_multipass: bool) -> Any | None:
+    """Load a tile bitmap from disk.
+
+    Returns the loaded BaseBitmap, or None if loading fails for a multi-pass tile.
+    Raises RuntimeError for beauty tile load failures.
+    """
+    tile_bmp = c4d.bitmaps.BaseBitmap()
+    result = tile_bmp.InitWith(tile_path)
+    if result[0] == c4d.IMAGERESULT_OK:
+        return tile_bmp
+    if is_multipass:
+        print(f"WARNING: failed to load {pass_label} tile: {tile_path}")
+        return None
+    raise RuntimeError(f"assemble_tiles: failed to load tile: {tile_path}")
+
+
+def _apply_color_profile(final_bmp: Any, source_bmp: Any, is_multipass: bool) -> None:
+    """Copy the color profile from source_bmp to final_bmp.
+
+    For beauty passes, falls back to empty profiles when the source has none.
+    """
+    profile = source_bmp.GetColorProfile()
+    if profile is not None:
+        final_bmp.SetColorProfile(profile)
+    elif not is_multipass:
+        final_bmp.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE)
+        final_bmp.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM)
+
+
+def _tile_path(base: str, ext: str, frame_str: str, col: int, row: int, is_multipass: bool) -> str:
+    """Return the file path for a specific tile."""
+    if is_multipass:
+        return f"{base}_tile_{col}_{row}_{frame_str}{ext}"
+    return f"{base}_{frame_str}_tile_{col}_{row}{ext}"
+
+
+def _copy_tile_pixels(
+    tile_bmp: Any,
+    final_bmp: Any,
+    col: int,
+    row: int,
+    tiles_columns: int,
+    tiles_rows: int,
+    full_w: int,
+    full_h: int,
+    color_mode: int,
+    inc: int,
+    is_multipass: bool,
+) -> None:
+    """Copy pixel data from a single tile bitmap into the final assembled bitmap."""
+    dst_x, cur_tile_w = _tile_extent(col, tiles_columns, full_w)
+    dst_y, cur_tile_h = _tile_extent(row, tiles_rows, full_h)
+
+    src_x = dst_x if is_multipass else 0
+    src_y = dst_y if is_multipass else 0
+
+    row_buffer = bytearray(cur_tile_w * inc)
+    row_view = memoryview(row_buffer)
+    for py in range(cur_tile_h):
+        tile_bmp.GetPixelCnt(
+            src_x, src_y + py, cur_tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
+        )
+        final_bmp.SetPixelCnt(
+            dst_x, dst_y + py, cur_tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
+        )
+
+
+def _save_assembled_image(
+    final_bmp: Any,
+    first_tile: Any,
+    base: str,
+    frame: int,
+    ext: str,
+    save_filter: int,
+    is_multipass: bool,
+) -> str:
+    """Save the assembled bitmap to disk and return the output path."""
+    final_path = f"{base}_{frame}{ext}"
+    output_dir = os.path.dirname(final_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    _apply_color_profile(final_bmp, first_tile, is_multipass)
+
+    final_filter = EXT_TO_FILTER.get(ext.lower(), save_filter)
+    final_bmp.Save(final_path, final_filter)
+    return final_path
+
+
 def _assemble_tiles_pass(
     base: str,
     ext: str,
@@ -280,40 +369,14 @@ def _assemble_tiles_pass(
     - Multi-pass tiles are full-resolution with only the tile region rendered;
       pixels are read from the tile's offset within the full image.
     - Beauty tile filenames embed the raw frame number; multi-pass uses zero-padded.
-
-    Args:
-        base: The output path stem (without extension).
-        ext: The file extension to use.
-        frame: The current frame number.
-        tiles_columns: Number of tile columns.
-        tiles_rows: Number of tile rows.
-        full_w: Full image width in pixels.
-        full_h: Full image height in pixels.
-        save_filter: The C4D save filter ID (fallback).
-        is_multipass: If True, use multi-pass tile naming and full-res source coords.
     """
     pass_label = "multi-pass" if is_multipass else "beauty"
     frame_str = str(frame).zfill(4) if is_multipass else str(frame)
 
-    # Build tile path: beauty  = {base}_{frame}_tile_{c}_{r}{ext}
-    #                  mp      = {base}_tile_{c}_{r}_{padded}{ext}
-    def _tile_path(col: int, row: int) -> str:
-        if is_multipass:
-            return f"{base}_tile_{col}_{row}_{frame_str}{ext}"
-        return f"{base}_{frame}_tile_{col}_{row}{ext}"
-
-    # Load first tile to determine bit depth
-    first_tile_path = _tile_path(0, 0)
-    first_tile = c4d.bitmaps.BaseBitmap()
-    result = first_tile.InitWith(first_tile_path)
-    if result[0] != c4d.IMAGERESULT_OK:
-        if is_multipass:
-            print(
-                f"WARNING: failed to load first {pass_label} tile: {first_tile_path}, "
-                f"skipping {pass_label} assembly"
-            )
-            return
-        raise RuntimeError(f"assemble_tiles: failed to load first tile: {first_tile_path}")
+    first_path = _tile_path(base, ext, frame_str, 0, 0, is_multipass)
+    first_tile = _load_tile_bitmap(first_path, pass_label, is_multipass)
+    if first_tile is None:
+        return
 
     bpp = first_tile.GetBt()
     color_mode, inc = determine_color_mode(bpp)
@@ -323,49 +386,33 @@ def _assemble_tiles_pass(
 
     for row in range(tiles_rows):
         for col in range(tiles_columns):
-            tile_path = _tile_path(col, row)
-            tile_bmp = c4d.bitmaps.BaseBitmap()
-            load_result = tile_bmp.InitWith(tile_path)
-            if load_result[0] != c4d.IMAGERESULT_OK:
-                if is_multipass:
-                    print(f"WARNING: failed to load {pass_label} tile: {tile_path}")
-                    continue
-                raise RuntimeError(f"assemble_tiles: failed to load tile: {tile_path}")
+            path = _tile_path(base, ext, frame_str, col, row, is_multipass)
+            tile_bmp = _load_tile_bitmap(path, pass_label, is_multipass)
+            if tile_bmp is None:
+                continue
+            _copy_tile_pixels(
+                tile_bmp,
+                final_bmp,
+                col,
+                row,
+                tiles_columns,
+                tiles_rows,
+                full_w,
+                full_h,
+                color_mode,
+                inc,
+                is_multipass,
+            )
 
-            dst_x, cur_tile_w = _tile_extent(col, tiles_columns, full_w)
-            dst_y, cur_tile_h = _tile_extent(row, tiles_rows, full_h)
-
-            # Beauty tiles are cropped — read from (0, py).
-            # Multi-pass tiles are full-res — read from the tile's offset.
-            src_x = dst_x if is_multipass else 0
-            src_y = dst_y if is_multipass else 0
-
-            row_buffer = bytearray(cur_tile_w * inc)
-            row_view = memoryview(row_buffer)
-            for py in range(cur_tile_h):
-                tile_bmp.GetPixelCnt(
-                    src_x, src_y + py, cur_tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
-                )
-                final_bmp.SetPixelCnt(
-                    dst_x, dst_y + py, cur_tile_w, row_view, inc, color_mode, c4d.PIXELCNT_0
-                )
-
-    # Save assembled image
-    final_path = f"{base}_{frame}{ext}"
-    output_dir = os.path.dirname(final_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    first_tile_profile = first_tile.GetColorProfile()
-    if first_tile_profile is not None:
-        final_bmp.SetColorProfile(first_tile_profile)
-    elif not is_multipass:
-        # Beauty pass: fall back to empty profiles so the image is always tagged.
-        final_bmp.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE)
-        final_bmp.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_VIEW_TRANSFORM)
-
-    final_filter = EXT_TO_FILTER.get(ext.lower(), save_filter)
-    final_bmp.Save(final_path, final_filter)
+    final_path = _save_assembled_image(
+        final_bmp,
+        first_tile,
+        base,
+        frame,
+        ext,
+        save_filter,
+        is_multipass,
+    )
     print(f"Assembled {pass_label} {tiles_columns * tiles_rows} tiles into {final_path}")
 
 

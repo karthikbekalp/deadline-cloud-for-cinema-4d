@@ -42,6 +42,8 @@ from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 
 LOADED = False
 
+_TAKE_TOKEN = "$take"
+
 
 def _get_release_date() -> Optional[str]:
     """Safely retrieve release date from _version.py.
@@ -442,8 +444,8 @@ def _resolve_take_paths(
     if has_take_token and take_name is not None:
         take_name_for_path = _STRIPPED_PATH_CHARS.sub("_", take_name)
         return (
-            settings.output_path.replace("$take", take_name_for_path),
-            settings.multi_pass_path.replace("$take", take_name_for_path),
+            settings.output_path.replace(_TAKE_TOKEN, take_name_for_path),
+            settings.multi_pass_path.replace(_TAKE_TOKEN, take_name_for_path),
         )
     return "{{Param.OutputPath}}", "{{Param.MultiPassPath}}"
 
@@ -559,7 +561,9 @@ def create_job_bundle(
     multi_pass_before = (
         settings.multi_pass_path if settings.override_multi_pass_path else scene_multi_pass_path
     )
-    has_take_token = "$take" in (output_path_before or "") or "$take" in (multi_pass_before or "")
+    has_take_token = _TAKE_TOKEN in (output_path_before or "") or _TAKE_TOKEN in (
+        multi_pass_before or ""
+    )
 
     # Add overrides to asset references and update the paths with C4D render path tokens.
     if settings.override_output_path:
@@ -824,13 +828,13 @@ def check_take_token_warnings(
     submit_takes = get_submit_takes(settings, takes)
     if len(submit_takes) == 1:
         return
-    if "$take" in settings.output_path:
+    if _TAKE_TOKEN in settings.output_path:
         return
-    if "$take" in settings.multi_pass_path:
+    if _TAKE_TOKEN in settings.multi_pass_path:
         return
     warning_collector.add_warning(
-        "Multiple takes are selected but output paths do not contain the $take token. "
-        "This will cause different takes to overwrite each other. Use $take in your path to avoid this."
+        f"Multiple takes are selected but output paths do not contain the {_TAKE_TOKEN} token. "
+        f"This will cause different takes to overwrite each other. Use {_TAKE_TOKEN} in your path to avoid this."
     )
 
 
