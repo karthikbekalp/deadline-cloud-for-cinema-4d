@@ -40,6 +40,7 @@ from .template_timeout_patcher import add_timeouts_to_job_template
 from .tile_utils import build_assembly_step, build_tile_task_parameters
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 from ._yaml_utils import _build_embedded_yaml
+from .update_utils import check_and_show_update_dialog
 
 LOADED = False
 
@@ -82,6 +83,9 @@ def show_submitter():
             app = QtWidgets.QApplication([])
             app.setQuitOnLastWindowClosed(False)
             app.aboutToQuit.connect(app.deleteLater)
+
+        if check_and_show_update_dialog():
+            return
 
         # Get the scene file's directory path to create the temporary directory
         # in the same location as the original scene file. This ensures consistent
