@@ -1,4 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+import logging
 import os
 import re
 import tempfile
@@ -14,6 +15,7 @@ import yaml  # type: ignore[import]
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt  # type: ignore[attr-defined]
 
+from deadline.client.api import UpdateCheckResult
 from deadline.client.dataclasses import SubmitterInfo
 from deadline.client.exceptions import DeadlineOperationError
 from deadline.client.job_bundle._yaml import deadline_yaml_dump
@@ -23,6 +25,7 @@ from deadline.client.ui.dialogs.submit_job_to_deadline_dialog import (  # pylint
     JobBundlePurpose,
     SubmitJobToDeadlineDialog,
 )
+from deadline.client.ui.dialogs.update_available_dialog import UpdateAvailableDialog
 
 from ._version import version_tuple as adaptor_version_tuple
 from .assets import AssetIntrospector
@@ -43,6 +46,8 @@ from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
 LOADED = False
 
 _TAKE_TOKEN = "$take"
+
+logger = logging.getLogger(__name__)
 
 
 def _get_release_date() -> Optional[str]:
@@ -71,6 +76,29 @@ class TakeData:
     marked: bool
 
 
+def _check_for_update() -> Optional[UpdateCheckResult]:
+    """Check if a newer version of the Cinema 4D submitter is available.
+
+    Returns:
+        An UpdateCheckResult if the check succeeded, or None if it failed silently.
+    """
+    try:
+        from deadline.client.api import check_for_updates
+
+        current_version = ".".join(str(v) for v in adaptor_version_tuple[:3])
+        result = check_for_updates(
+            integration_name="deadline-cloud-for-cinema-4d",
+            current_version=current_version,
+        )
+        return result
+    except ImportError as e:
+        logger.debug(f"ImportError — skipping update check: {e}")
+        return None
+    except Exception:
+        logger.debug("Update check failed — skipping", exc_info=True)
+        return None
+
+
 def show_submitter():
     if _prompt_save_current_document() is False:
         return
@@ -81,6 +109,22 @@ def show_submitter():
             app = QtWidgets.QApplication([])
             app.setQuitOnLastWindowClosed(False)
             app.aboutToQuit.connect(app.deleteLater)
+
+        # Check for updates before showing the submitter
+        update_result = _check_for_update()
+        if update_result and update_result.update_available:
+            app.setStyleSheet(C4D_STYLE)
+            update_dialog = UpdateAvailableDialog(
+                integration_name="Cinema 4D",
+                current_version=update_result.current_version or "",
+                latest_version=update_result.latest_version or "",
+                download_url=update_result.download_url,
+                release_notes_url="https://github.com/aws-deadline/deadline-cloud-for-cinema-4d/releases",
+            )
+            update_dialog.setStyleSheet(C4D_STYLE)
+            update_dialog.exec_()
+            if update_dialog.user_downloaded:
+                return
 
         # Get the scene file's directory path to create the temporary directory
         # in the same location as the original scene file. This ensures consistent
