@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 import logging as _logging
 import subprocess
-import sys
 from pathlib import Path
 
 import c4d
@@ -120,9 +119,11 @@ def has_gui_deps():
 def _install_packages(packages, description):
     """Helper function to install packages using Cinema 4D's python.
 
-    We are working on bundling these dependencies in the submitter.
-    But for now, its ok to install using pip install.
+    This is a fallback for cases where GUI dependencies were not bundled
+    correctly. Once bundling is confirmed working, this can be removed.
     """
+    import sys
+
     c4d_app = sys.executable
 
     c4d_executable = "Cinema 4D.exe"
