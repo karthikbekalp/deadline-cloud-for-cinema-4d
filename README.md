@@ -72,7 +72,7 @@ set SUBMITTER_LOCATION=%APPDATA%\DeadlineCloudSubmitter
 "C:\Program Files\Maxon Cinema 4D 2026\resource\modules\python\libs\win64\python.exe" -m ensurepip
 
 :: Install required Python packages to our custom location
-"C:\Program Files\Maxon Cinema 4D 2026\resource\modules\python\libs\win64\python.exe" -m pip install deadline-cloud-for-cinema-4d -t %SUBMITTER_LOCATION%
+"C:\Program Files\Maxon Cinema 4D 2026\resource\modules\python\libs\win64\python.exe" -m pip install "deadline-cloud-for-cinema-4d[gui]" -t %SUBMITTER_LOCATION%
 
 :: Create plugins directory
 md %SUBMITTER_LOCATION%\cinema_4d_plugins
@@ -119,7 +119,7 @@ mkdir -p $SUBMITTER_LOCATION
 
 # Install Python packages
 python3 -m ensurepip
-python3 -m pip install deadline-cloud-for-cinema-4d -t $SUBMITTER_LOCATION
+python3 -m pip install "deadline-cloud-for-cinema-4d[gui]" -t $SUBMITTER_LOCATION
 
 # Create plugins directory
 mkdir -p $SUBMITTER_LOCATION/cinema_4d_plugins
