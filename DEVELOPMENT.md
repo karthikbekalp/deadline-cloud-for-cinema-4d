@@ -2,6 +2,13 @@
 
 This documentation provides guidance on developer workflows for working with the code in this repository.
 
+> **Tip:** This repo includes three AI skills in `skills/` (following the [Agent Skills standard](https://agentskills.io/)) to accelerate development with AI coding assistants:
+> - **c4d-dev-setup** — Automates dev environment setup. Ask: *"use c4d-dev-setup to set up this computer"*
+> - **c4d-dev** — Day-to-day development: build, test, lint, debug. Ask: *"how do I run integration tests?"*
+> - **c4d-design** — Structured design docs for new features. Ask: *"help me design a new feature"*
+>
+> See [AGENTS.md](AGENTS.md) at the repo root for general agent guidance that applies across all AI tools.
+
 Table of Contents:
 
 * [Development Environment Setup](#development-environment-setup)
