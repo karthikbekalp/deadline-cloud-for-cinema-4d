@@ -94,6 +94,33 @@ hatch run integ:test -k "redshift"
 hatch run integ:test -k "redshift_tiles"
 ```
 
+### xa11y-driven integration test (`test/integ_xa11y/`)
+
+Mirrors the layout and naming of `test/integ/` (`test_cinema4d.py`,
+`test_scenes/<name>/scene/scene.py`, `generated_bundle/`, etc.) but
+drives the **real Deadline Cloud submitter dialog** with
+[xa11y](https://xa11y.dev) instead of calling `internal_create_job_bundle()`
+directly.
+
+Once we're confident in this test, the plan is to delete `test/integ/`
+and rename this folder to `test/integ/`.
+
+The test launches the Cinema 4D GUI binary, points it at the real
+`deadline_cloud_extension/DeadlineCloud.pyp` via `g_additionalModulePath`
+(no test-only plugin), clicks `Extensions > AWS Deadline Cloud Submitter`,
+clicks `Export bundle`, copies the resulting bundle flat into
+`<scene>/generated_bundle/`, then runs `openjd check` and `openjd run`
+against it — same final assertions as the existing test.
+
+```bash
+hatch run integ-xa11y:test                        # all xa11y integ tests
+hatch run integ-xa11y:test -k cube                # one parametrization
+```
+
+Caveats:
+- Windows SMF workers run in Session 0 with no interactive desktop, so
+  UI Automation returns nothing there. Local interactive sessions only.
+
 ## Installer Tests
 
 Test the built installer. Requires having run `hatch run installer:build-installer` first.
