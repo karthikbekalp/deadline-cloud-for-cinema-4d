@@ -50,9 +50,14 @@ def assert_openjd_run_with_cinema4d_successful(
     params_path: Path,
 ) -> None:
     """Run each step in the template via `openjd run` against Cinema 4D Commandline."""
-    c4d_exe = cinema4d_location / (
-        "Commandline.exe" if sys.platform == "win32" else "bin" / Path("Commandline")
-    )
+    if sys.platform == "win32":
+        c4d_exe = cinema4d_location / "Commandline.exe"
+    elif sys.platform == "darwin":
+        c4d_exe = (
+            cinema4d_location / "Commandline.app" / "Contents" / "MacOS" / "Commandline"
+        )
+    else:
+        c4d_exe = cinema4d_location / "bin" / "Commandline"
     test_env = {
         "C4D_COMMANDLINE_EXECUTABLE": str(c4d_exe),
         "CINEMA4D_ADAPTOR_TESTING": "True",
@@ -96,11 +101,28 @@ def resolve_c4d_gui_exe(cinema4d_location: Path) -> Path:
     """Path to the GUI Cinema 4D binary (not Commandline, not c4dpy)."""
     if sys.platform == "win32":
         exe = cinema4d_location / "Cinema 4D.exe"
+    elif sys.platform == "darwin":
+        # Maxon ships everything as .app bundles on Mac.
+        exe = cinema4d_location / "Cinema 4D.app" / "Contents" / "MacOS" / "Cinema 4D"
     else:
         exe = cinema4d_location / "Cinema 4D"
     if not exe.exists():
         raise FileNotFoundError(f"Cinema 4D GUI executable not found at {exe}")
     log(f"resolved C4D GUI: {exe}")
+    return exe
+
+
+def resolve_c4dpy_exe(cinema4d_location: Path) -> Path:
+    """Path to the c4dpy binary used to run scene-build scripts."""
+    if sys.platform == "win32":
+        exe = cinema4d_location / "c4dpy.exe"
+    elif sys.platform == "darwin":
+        exe = cinema4d_location / "c4dpy.app" / "Contents" / "MacOS" / "c4dpy"
+    else:
+        exe = cinema4d_location / "c4dpy"
+    if not exe.exists():
+        raise FileNotFoundError(f"c4dpy executable not found at {exe}")
+    log(f"resolved c4dpy: {exe}")
     return exe
 
 

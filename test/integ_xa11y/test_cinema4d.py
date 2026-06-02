@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -20,6 +21,7 @@ from .utils import (
     log,
     override_job_history_dir,
     resolve_c4d_gui_exe,
+    resolve_c4dpy_exe,
     wait_for_bundle,
 )
 
@@ -50,6 +52,16 @@ _BUNDLE_EXPORT_TIMEOUT_S = 60.0
 _BUNDLE_ON_DISK_TIMEOUT_S = 30.0
 
 
+def _prepend(new: str, existing: str, sep: str) -> str:
+    """Prepend `new` to `existing` using `sep`, without leaving a dangling
+    separator when `existing` is empty.
+
+    Cinema 4D parses g_additionalModulePath strictly — a trailing separator
+    leaves the last path interpreted as `<path>:` and fails to resolve.
+    """
+    return f"{new}{sep}{existing}" if existing else new
+
+
 def _wait_for_dialog_app(pid: int, name_prefix: str, timeout_s: float):
     """Poll xa11y.App.list() for an app whose name starts with `name_prefix`
     and whose PID matches. Returns the matching App or None on timeout.
@@ -76,6 +88,7 @@ def _wait_for_dialog_app(pid: int, name_prefix: str, timeout_s: float):
 def test_integ(
     cinema4d_location: Path,
     test_scenes_folder_location: Path,
+    mock_deadline_farm: dict,
     test_name: str,
 ) -> None:
     """
@@ -111,7 +124,7 @@ def test_integ(
     """
     assert _REAL_PLUGIN_FILE.is_file(), f"DeadlineCloud.pyp not found at {_REAL_PLUGIN_FILE}"
 
-    c4dpy_location = cinema4d_location / "c4dpy"
+    c4dpy_location = resolve_c4dpy_exe(cinema4d_location)
     test_scene_folder_location = test_scenes_folder_location / test_name
     test_scene_script_location = test_scene_folder_location / "scene" / "scene.py"
     job_bundle_generated = test_scene_folder_location / "generated_bundle"
@@ -127,24 +140,42 @@ def test_integ(
         c4dpy_location, test_scene_script_location, job_bundle_generated
     )
 
+    # Mock farm env vars point AWS clients at our in-process HTTP servers.
+    # The shim dir contains a sitecustomize.py that strips the `management.`
+    # host prefix botocore injects on every deadline: call.
+    mock_env = mock_deadline_farm["env"]
+    shim_dir = mock_deadline_farm["shim_dir"]
+
     env = {
         **os.environ,
+        **mock_env,
         # Point C4D at the .pyp checked into this repo. Same env var the
         # InstallBuilder installer sets — C4D scans every dir on this
-        # path at startup for plugin files.
-        "g_additionalModulePath": (
-            str(_REAL_PLUGIN_DIR)
-            + os.pathsep
-            + os.environ.get("g_additionalModulePath", "")
+        # path at startup for plugin files. C4D uses ';' as the separator
+        # on every platform (it is not the OS pathsep).
+        "g_additionalModulePath": _prepend(
+            str(_REAL_PLUGIN_DIR),
+            os.environ.get("g_additionalModulePath", ""),
+            ";",
         ),
         # C4D's bundled Python uses this for extra package resolution.
         # We need the editable submitter source plus the venv site-packages
-        # (PySide6 / qtpy / deadline-client all live there).
-        "C4DPYTHONPATH311": (
-            build_submitter_pythonpath(_REPO_ROOT)
-            + os.pathsep
-            + os.environ.get("C4DPYTHONPATH311", "")
+        # (PySide6 / qtpy / deadline-client all live there) and the shim
+        # dir so sitecustomize patches botocore on interpreter start.
+        "C4DPYTHONPATH311": _prepend(
+            shim_dir,
+            _prepend(
+                build_submitter_pythonpath(_REPO_ROOT),
+                os.environ.get("C4DPYTHONPATH311", ""),
+                os.pathsep,
+            ),
+            os.pathsep,
         ),
+        # Tells DeadlineCloud.pyp to open the submitter dialog at plugin
+        # load via c4d.CallCommand. Removes the need to drive Cinema 4D's
+        # Commander palette with simulated keystrokes, which is fragile
+        # (especially on macOS).
+        "DEADLINE_CLOUD_AUTO_OPEN_SUBMITTER": "1",
     }
 
     # The submitter exports via create_job_history_bundle_dir, which always
@@ -155,116 +186,85 @@ def test_integ(
     log(f"bundle staging dir: {bundle_staging}")
     try:
         with override_job_history_dir(bundle_staging):
-            log(f"launching Cinema 4D: {cinema4d_gui_exe} {scene_path}")
-            proc = subprocess.Popen(
-                [str(cinema4d_gui_exe), str(scene_path)],
-                env=env,
-            )
+            if sys.platform == "darwin":
+                # On macOS, the binary inside .app/Contents/MacOS/ ignores
+                # argv for file arguments — macOS apps receive files via
+                # Apple Events (kAEOpenDocuments). Use the binary directly
+                # (so we get a real PID for xa11y) but pass the scene path
+                # via an env var that the PluginMessage hook reads to open
+                # the document after C4D finishes starting.
+                env["DEADLINE_CLOUD_SCENE_PATH"] = str(scene_path)
+                log(f"launching Cinema 4D (mac): {cinema4d_gui_exe}")
+                proc = subprocess.Popen(
+                    [str(cinema4d_gui_exe)],
+                    env=env,
+                )
+            else:
+                log(f"launching Cinema 4D: {cinema4d_gui_exe} {scene_path}")
+                proc = subprocess.Popen(
+                    [str(cinema4d_gui_exe), str(scene_path)],
+                    env=env,
+                )
             log(f"Cinema 4D launched, pid={proc.pid}")
             try:
                 log(f"waiting up to {_C4D_BOOT_TIMEOUT_S:.0f}s for xa11y to attach by pid")
                 app = xa11y.App.by_pid(proc.pid, timeout=_C4D_BOOT_TIMEOUT_S)
                 log("xa11y attached to Cinema 4D")
 
-                # Cinema 4D's main window does not expose its custom menu
-                # bar to UI Automation, and Cinema 4D's top-level menus do
-                # not respond to Alt-mnemonics on Windows (its menu bar is
-                # custom-drawn). Instead we drive the built-in Commander
-                # (Shift+C), a fuzzy command palette that can launch any
-                # registered command by name — including our submitter.
-                log("settling 5s before sending keyboard input")
-                time.sleep(5)
-
-                # Cinema 4D's Commander index can take a few seconds to
-                # populate after a cold start, so the first attempt sometimes
-                # arrows down on an empty list. Retry the open + type +
-                # activate sequence until the dialog UIA app appears.
-                dialog_app = None
-                for attempt in range(1, 4):
-                    log(f"Commander attempt {attempt}/3")
-
-                    # Make sure Cinema 4D has OS focus before we send keys;
-                    # otherwise input_sim posts to whatever window the
-                    # terminal/IDE last had focused.
-                    try:
-                        app.as_element().focus()
-                    except Exception as e:
-                        log(f"focus() failed (non-fatal): {e!r}")
-
-                    input_sim = xa11y.input_sim()
-                    log("  Shift+C to open Commander")
-                    input_sim.chord("c", held=["Shift"])
-                    time.sleep(1.0)
-
-                    log("  typing 'AWS Deadline Cloud Submitter'")
-                    input_sim.type_text("AWS Deadline Cloud Submitter")
-                    # Wait long enough for Commander to filter results;
-                    # the first attempt after a cold start can be slow.
-                    time.sleep(3.0)
-
-                    log("  ArrowDown to highlight the first match")
-                    input_sim.press("ArrowDown")
-                    time.sleep(0.5)
-
-                    log("  pressing Enter to launch")
-                    input_sim.press("Enter")
-                    time.sleep(1.0)
-
-                    log("  polling App.list() for the dialog")
+                # The plugin opens the submitter automatically at load time
+                # via DEADLINE_CLOUD_AUTO_OPEN_SUBMITTER=1. Where the dialog
+                # appears in the accessibility tree is platform-specific:
+                #   - Windows UIA: Qt registers each dialog as a separate
+                #     top-level UIA app sharing the C4D pid.
+                #   - macOS AX: dialogs are child windows of the host app.
+                if sys.platform == "win32":
                     dialog_app = _wait_for_dialog_app(
                         pid=proc.pid,
                         name_prefix=_DIALOG_APP_PREFIX,
-                        timeout_s=15.0,
+                        timeout_s=_DIALOG_VISIBLE_TIMEOUT_S,
                     )
-                    if dialog_app is not None:
-                        break
-                    log(
-                        f"  attempt {attempt}: dialog did not appear, "
-                        f"sending Escape and retrying"
-                    )
-                    # Make sure Commander is dismissed before retrying.
-                    try:
-                        input_sim.press("Escape")
-                    except Exception:
-                        pass
-                    time.sleep(2.0)
-                if dialog_app is None:
-                    log("dialog never registered as a UIA app; debugging info:")
-                    try:
-                        log("Cinema 4D app tree:")
-                        print(app.dump())
-                    except Exception:
-                        pass
-                    try:
-                        log("All running apps:")
-                        for a in xa11y.App.list():
-                            print(f"  - {a.name!r} (pid={a.pid})")
-                    except Exception as e:
-                        log(f"App.list() failed: {e!r}")
-                    raise AssertionError(
-                        "Submitter dialog did not register with UIA "
-                        f"(expected app name prefix {_DIALOG_APP_PREFIX!r})"
-                    )
-                log(f"submitter dialog UIA app: {dialog_app.name!r}")
-                # Dump what's inside the dialog app's tree so we can pin
-                # the right selector on first run.
+                    if dialog_app is None:
+                        log("dialog never registered as a UIA app; debugging info:")
+                        try:
+                            log("Cinema 4D app tree:")
+                            print(app.dump())
+                        except Exception:
+                            pass
+                        try:
+                            log("All running apps:")
+                            for a in xa11y.App.list():
+                                print(f"  - {a.name!r} (pid={a.pid})")
+                        except Exception as e:
+                            log(f"App.list() failed: {e!r}")
+                        raise AssertionError(
+                            "Submitter dialog did not register with UIA "
+                            f"(expected app name prefix {_DIALOG_APP_PREFIX!r})"
+                        )
+                    log(f"submitter dialog UIA app: {dialog_app.name!r}")
+                else:
+                    # On macOS the dialog is a child window of the C4D app.
+                    dialog_app = app
+                    log("macOS: using C4D app handle for dialog discovery")
+
+                # Dump the tree for diagnostics on first run / failures.
                 try:
                     log("dialog app tree (depth=8):")
                     print(dialog_app.dump(max_depth=8))
                 except Exception as e:
                     log(f"dialog_app.dump() failed: {e!r}")
 
+                # On Windows UIA: role=dialog, name=QApplication display name.
+                # On macOS AX: role=window, name=window title.
+                # Try both selectors.
                 log(f"waiting for dialog: {_DIALOG_NAME_PREFIX!r}")
-                # UIA exposes Qt's top-level dialog with role=dialog and the
-                # QApplication display name as its accessible name (which is
-                # what UIA surfaces, not Qt's windowTitle).
                 dialog = dialog_app.locator(
-                    f"dialog[name^='{_DIALOG_NAME_PREFIX}']"
+                    f"dialog[name^='{_DIALOG_NAME_PREFIX}'], "
+                    f"window[name^='{_DIALOG_NAME_PREFIX}']"
                 )
                 try:
                     dialog.wait_visible(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
                 except Exception:
-                    log("dialog window selector failed; final dialog app tree:")
+                    log("dialog selector failed; final tree:")
                     try:
                         print(dialog_app.dump())
                     except Exception:
@@ -272,12 +272,8 @@ def test_integ(
                     raise
                 log("submitter dialog visible")
 
-                # The dialog renders "Loading Queue Environments..." as a
-                # placeholder while the auth probe + queue-env fetch runs.
-                # If we click Export bundle before that resolves, the
-                # callback fires with empty queue parameters and the export
-                # path inside the submitter throws. Wait for the loading
-                # text to disappear before proceeding.
+                # Wait for queue environment loading to finish (non-fatal
+                # if it times out — Export bundle may still be clickable).
                 log("waiting for queue environment loading to finish")
                 loading = dialog_app.locator(
                     "static_text[name^='Loading Queue Environments']"
@@ -289,8 +285,6 @@ def test_integ(
                     log(f"loading-text wait failed (non-fatal): {e!r}")
 
                 log(f"waiting for button: {_EXPORT_BUTTON_NAME!r}")
-                # xa11y's Locator chaining method is `descendant`, not
-                # `locator` — Locator has no .locator() (only App does).
                 export_btn = dialog.descendant(
                     f"button[name='{_EXPORT_BUTTON_NAME}']"
                 )
@@ -307,24 +301,29 @@ def test_integ(
                         pass
                     raise
 
-                # The submitter pops a QMessageBox.information on success
-                # before closing the dialog. Dismiss it so C4D returns to idle.
-                # Same UIA app as the dialog itself (same Qt process).
-                # The success popup may surface as either a dialog or a window
-                # depending on Qt's Win UIA mapping; match either via comma
-                # alternation in the selector.
-                log(f"waiting for success popup: {_SUCCESS_DIALOG_PREFIX!r}")
-                success = dialog_app.locator(
-                    f"dialog[name^='{_SUCCESS_DIALOG_PREFIX}'], "
-                    f"window[name^='{_SUCCESS_DIALOG_PREFIX}']"
-                )
-                success.wait_visible(timeout=_BUNDLE_EXPORT_TIMEOUT_S)
-                log("dismissing success popup (OK)")
-                success.descendant("button[name='OK']").press()
-
+                # Wait for the bundle to land on disk. This is the source
+                # of truth for export success — more reliable than trying
+                # to match the QMessageBox success popup's AX name across
+                # platforms (on macOS it surfaces differently than on
+                # Windows UIA).
                 staged_bundle = wait_for_bundle(
-                    bundle_staging, timeout_s=_BUNDLE_ON_DISK_TIMEOUT_S
+                    bundle_staging, timeout_s=_BUNDLE_EXPORT_TIMEOUT_S
                 )
+
+                # Dismiss the success popup if we can find it, but don't
+                # fail if we can't — the bundle is already on disk.
+                log(f"looking for success popup: {_SUCCESS_DIALOG_PREFIX!r}")
+                try:
+                    success = dialog_app.locator(
+                        f"dialog[name^='{_SUCCESS_DIALOG_PREFIX}'], "
+                        f"window[name^='{_SUCCESS_DIALOG_PREFIX}'], "
+                        f"sheet[name^='{_SUCCESS_DIALOG_PREFIX}']"
+                    )
+                    success.wait_visible(timeout=5.0)
+                    log("dismissing success popup (OK)")
+                    success.descendant("button[name='OK']").press()
+                except Exception:
+                    log("success popup not found (non-fatal, bundle already exported)")
                 # Copy bundle files flat into generated_bundle/.
                 log(f"copying bundle files {staged_bundle} -> {job_bundle_generated}")
                 for src in staged_bundle.iterdir():
@@ -341,24 +340,34 @@ def test_integ(
     assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
 
     log("comparing generated bundle against expected_job_bundle/")
-    expected_job_bundle = test_scene_folder_location / "expected_job_bundle"
+    if sys.platform == "darwin":
+        expected_job_bundle = test_scene_folder_location / "expected_job_bundle_darwin"
+    else:
+        expected_job_bundle = test_scene_folder_location / "expected_job_bundle"
     assert_expected_job_bundle_and_generated_job_bundle_are_equal(
         expected_job_bundle, job_bundle_generated
     )
 
-    log("running openjd run with Cinema 4D Commandline for each step")
-    assert_openjd_run_with_cinema4d_successful(
-        cinema4d_location,
-        job_bundle_generated / "template.yaml",
-        job_bundle_generated / "parameter_values.yaml",
-    )
+    # The adaptor portion (openjd run + render compare) only runs on Windows
+    # and Linux. On macOS we stop after bundle comparison: the goal of the
+    # Mac test is submitter coverage, and the render path needs Conda-managed
+    # cinema4d-openjd which we don't ship for darwin yet.
+    if sys.platform == "darwin":
+        log("skipping openjd run + render compare on macOS (submitter-only)")
+    else:
+        log("running openjd run with Cinema 4D Commandline for each step")
+        assert_openjd_run_with_cinema4d_successful(
+            cinema4d_location,
+            job_bundle_generated / "template.yaml",
+            job_bundle_generated / "parameter_values.yaml",
+        )
 
-    log("comparing rendered output against expected_job_output/")
-    expected_job_output = test_scene_folder_location / "expected_job_output"
-    assert_all_images_close(
-        expected_job_output / "renders",
-        job_bundle_generated / "renders",
-    )
+        log("comparing rendered output against expected_job_output/")
+        expected_job_output = test_scene_folder_location / "expected_job_output"
+        assert_all_images_close(
+            expected_job_output / "renders",
+            job_bundle_generated / "renders",
+        )
 
     # Clean up if the test was successful
     rmtree(job_bundle_generated, ignore_errors=True)
