@@ -186,14 +186,14 @@ def test_integ(
     log(f"bundle staging dir: {bundle_staging}")
     try:
         with override_job_history_dir(bundle_staging):
+            # Pass the scene path via env var on all platforms so the
+            # PluginMessage hook loads it with LoadDocument before
+            # opening the submitter. C4DPL_PROGRAM_STARTED fires before
+            # C4D processes argv files, so without this the active
+            # document has no path when the submitter opens.
+            env["DEADLINE_CLOUD_SCENE_PATH"] = str(scene_path)
+
             if sys.platform == "darwin":
-                # On macOS, the binary inside .app/Contents/MacOS/ ignores
-                # argv for file arguments — macOS apps receive files via
-                # Apple Events (kAEOpenDocuments). Use the binary directly
-                # (so we get a real PID for xa11y) but pass the scene path
-                # via an env var that the PluginMessage hook reads to open
-                # the document after C4D finishes starting.
-                env["DEADLINE_CLOUD_SCENE_PATH"] = str(scene_path)
                 log(f"launching Cinema 4D (mac): {cinema4d_gui_exe}")
                 proc = subprocess.Popen(
                     [str(cinema4d_gui_exe)],

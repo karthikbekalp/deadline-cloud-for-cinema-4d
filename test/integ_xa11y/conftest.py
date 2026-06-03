@@ -156,7 +156,7 @@ def mock_deadline_farm() -> Iterator[dict]:
         "[profile-(default) defaults]\n"
         f"farm_id = {farm_id}\n"
         "\n"
-        f"[profile-(default) {farm_id}]\n"
+        f"[profile-(default) {farm_id} defaults]\n"
         f"queue_id = {queue_id}\n"
         "\n"
         "[telemetry]\n"

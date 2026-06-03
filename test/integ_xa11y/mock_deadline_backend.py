@@ -35,8 +35,36 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_CONDA_QUEUE_ENV_ID = "queueenv-00000000000000000000000000000001"
+
+_CONDA_QUEUE_ENV_TEMPLATE = (
+    "specificationRevision: 'jobtemplate-2023-09'\n"
+    "environment:\n"
+    "  name: Conda\n"
+    "parameterDefinitions:\n"
+    "- name: CondaPackages\n"
+    "  type: STRING\n"
+    "  default: cinema4d=2024 cinema4d-openjd\n"
+    "  description: >-\n"
+    "    Space-separated list of Conda package match specifications.\n"
+    "  userInterface:\n"
+    "    control: LINE_EDIT\n"
+    "    groupLabel: 'Queue Environment: Conda'\n"
+    "    label: Conda Packages\n"
+    "- name: CondaChannels\n"
+    "  type: STRING\n"
+    "  default: deadline-cloud\n"
+    "  description: >-\n"
+    "    Space-separated list of Conda channels.\n"
+    "  userInterface:\n"
+    "    control: LINE_EDIT\n"
+    "    groupLabel: 'Queue Environment: Conda'\n"
+    "    label: Conda Channels\n"
+)
+
+
 class MockDeadlineFarm:
-    """Holds the seeded farm + queue identifiers and serves the three
+    """Holds the seeded farm + queue identifiers and serves the
     Deadline routes the submitter dialog hits at startup."""
 
     def __init__(
@@ -94,15 +122,57 @@ class MockDeadlineFarm:
             ]
         }
 
+    def list_queues(self, path_params: dict) -> tuple[int, dict]:
+        if path_params["farmId"] != self.farm_id:
+            return 404, {"message": f"Farm {path_params['farmId']} not found"}
+        return 200, {
+            "queues": [
+                {
+                    "queueId": self.queue_id,
+                    "farmId": self.farm_id,
+                    "displayName": self._queue["displayName"],
+                    "status": "ACTIVE",
+                    "createdAt": self._queue["createdAt"],
+                    "createdBy": self._queue["createdBy"],
+                }
+            ]
+        }
+
     def list_queue_environments(self, path_params: dict) -> tuple[int, dict]:
         if (
             path_params["farmId"] != self.farm_id
             or path_params["queueId"] != self.queue_id
         ):
             return 404, {"message": f"Queue {path_params.get('queueId')} not found"}
-        # Empty list → dialog stops showing "Loading Queue Environments..."
-        # and never calls GetQueueEnvironment.
-        return 200, {"environments": []}
+        return 200, {
+            "environments": [
+                {
+                    "queueEnvironmentId": _CONDA_QUEUE_ENV_ID,
+                    "name": "Conda",
+                    "priority": 1,
+                }
+            ]
+        }
+
+    def get_queue_environment(self, path_params: dict) -> tuple[int, dict]:
+        if (
+            path_params["farmId"] != self.farm_id
+            or path_params["queueId"] != self.queue_id
+        ):
+            return 404, {"message": f"Queue {path_params.get('queueId')} not found"}
+        if path_params["queueEnvironmentId"] != _CONDA_QUEUE_ENV_ID:
+            return 404, {
+                "message": f"QueueEnvironment {path_params['queueEnvironmentId']} not found"
+            }
+        return 200, {
+            "queueEnvironmentId": _CONDA_QUEUE_ENV_ID,
+            "name": "Conda",
+            "priority": 1,
+            "template": _CONDA_QUEUE_ENV_TEMPLATE,
+            "templateType": "YAML",
+            "createdAt": _now_iso(),
+            "createdBy": "mock-user",
+        }
 
 
 def _compile_route(method: str, path: str, handler):
@@ -116,17 +186,25 @@ def _make_deadline_handler(farm: MockDeadlineFarm):
     routes = [
         _compile_route("GET", "/farms", farm.list_farms),
         _compile_route("GET", "/farms/{farmId}", farm.get_farm),
+        _compile_route("GET", "/farms/{farmId}/queues", farm.list_queues),
         _compile_route("GET", "/farms/{farmId}/queues/{queueId}", farm.get_queue),
         _compile_route(
             "GET",
             "/farms/{farmId}/queues/{queueId}/environments",
             farm.list_queue_environments,
         ),
+        _compile_route(
+            "GET",
+            "/farms/{farmId}/queues/{queueId}/environments/{queueEnvironmentId}",
+            farm.get_queue_environment,
+        ),
     ]
 
     class _Handler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # silence access logs
-            return
+        def log_message(self, format, *args):
+            print(f"[mock-deadline] {self.command} {self.path}")
+
+
 
         def _dispatch(self, method: str) -> None:
             path = self.path.split("?", 1)[0]
