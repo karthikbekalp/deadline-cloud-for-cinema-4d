@@ -30,6 +30,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REAL_PLUGIN_DIR = _REPO_ROOT / "deadline_cloud_extension"
 _REAL_PLUGIN_FILE = _REAL_PLUGIN_DIR / "DeadlineCloud.pyp"
 
+# Test-only sidecar plugin loaded alongside the real plugin (see its docstring).
+# Its presence on g_additionalModulePath is what auto-opens the submitter; the
+# shipped DeadlineCloud.pyp carries no test hook of its own.
+_AUTO_OPEN_PLUGIN_DIR = Path(__file__).parent / "fixtures" / "auto_open_submitter"
+_AUTO_OPEN_PLUGIN_FILE = _AUTO_OPEN_PLUGIN_DIR / "AutoOpenSubmitter.pyp"
+
 # Selector strings pinned by inspecting the live UIA tree at runtime
 # (see commit history for tree dumps). UIA on Windows surfaces the Qt
 # QApplication display name as the dialog's accessible name — *not*
@@ -84,6 +90,19 @@ def _wait_for_dialog_app(pid: int, name_prefix: str, timeout_s: float):
     return None
 
 
+def _dump_plugin_diag_log(log_path: Path) -> None:
+    """Echo the sidecar plugin's diagnostic log into the test output. C4D's
+    stdout is detached from pytest's, so this is how the plugin's traces (scene
+    load, CallCommand result, any exceptions) reach a failing run's report.
+    Called before the staging dir is removed."""
+    if not log_path.is_file():
+        log(f"no plugin diag log at {log_path}")
+        return
+    log(f"--- sidecar plugin diag log ({log_path}) ---")
+    print(log_path.read_text(encoding="utf-8", errors="replace"))
+    log("--- end sidecar plugin diag log ---")
+
+
 @pytest.mark.parametrize("test_name", ["cube"])
 def test_integ(
     cinema4d_location: Path,
@@ -97,10 +116,11 @@ def test_integ(
 
     This test exercises the full submitter flow:
     1. Builds a test scene with c4dpy
-    2. Launches Cinema 4D with the repo plugin and scene loaded
-    3. Sends Shift+C + "AWS Deadline Cloud Submitter" + Enter via
-       xa11y.input_sim() to launch the submitter via Cinema 4D's
-       Commander palette (the menu bar is not exposed to UIA)
+    2. Launches Cinema 4D with the real submitter plugin and the test-only
+       sidecar plugin both on g_additionalModulePath
+    3. The sidecar plugin, on C4DPL_PROGRAM_STARTED, loads the scene and opens
+       the real submitter via CallCommand (no simulated keystrokes — the
+       shipped plugin is unmodified)
     4. Drives the resulting Qt submitter dialog via xa11y locator
        (Export bundle button + success popup)
     5. Copies the exported job bundle into generated_bundle/
@@ -123,6 +143,9 @@ def test_integ(
             - openjd run failing for any step
     """
     assert _REAL_PLUGIN_FILE.is_file(), f"DeadlineCloud.pyp not found at {_REAL_PLUGIN_FILE}"
+    assert (
+        _AUTO_OPEN_PLUGIN_FILE.is_file()
+    ), f"Auto-open sidecar plugin not found at {_AUTO_OPEN_PLUGIN_FILE}"
 
     c4dpy_location = resolve_c4dpy_exe(cinema4d_location)
     test_scene_folder_location = test_scenes_folder_location / test_name
@@ -149,13 +172,19 @@ def test_integ(
     env = {
         **os.environ,
         **mock_env,
-        # Point C4D at the .pyp checked into this repo. Same env var the
-        # InstallBuilder installer sets — C4D scans every dir on this
-        # path at startup for plugin files. C4D uses ';' as the separator
-        # on every platform (it is not the OS pathsep).
+        # Point C4D at two plugin dirs: the real submitter plugin checked into
+        # this repo, and the test-only sidecar that auto-opens the submitter.
+        # C4D loads every .pyp on this path at startup; the sidecar dispatches
+        # into the real, unmodified plugin via CallCommand. Same env var the
+        # InstallBuilder installer sets. C4D uses ';' as the separator on every
+        # platform (it is not the OS pathsep).
         "g_additionalModulePath": _prepend(
-            str(_REAL_PLUGIN_DIR),
-            os.environ.get("g_additionalModulePath", ""),
+            str(_AUTO_OPEN_PLUGIN_DIR),
+            _prepend(
+                str(_REAL_PLUGIN_DIR),
+                os.environ.get("g_additionalModulePath", ""),
+                ";",
+            ),
             ";",
         ),
         # C4D's bundled Python uses this for extra package resolution.
@@ -171,26 +200,27 @@ def test_integ(
             ),
             os.pathsep,
         ),
-        # Tells DeadlineCloud.pyp to open the submitter dialog at plugin
-        # load via c4d.CallCommand. Removes the need to drive Cinema 4D's
-        # Commander palette with simulated keystrokes, which is fragile
-        # (especially on macOS).
-        "DEADLINE_CLOUD_AUTO_OPEN_SUBMITTER": "1",
     }
+    # DEADLINE_CLOUD_DIAG_LOG and DEADLINE_CLOUD_SCENE_PATH are added below,
+    # once bundle_staging exists.
 
     # The submitter exports via create_job_history_bundle_dir, which always
     # writes under <history_dir>/<YYYY-mm>/<bundle-name>/. Point the history
     # at a staging dir, then copy the bundle files flat into generated_bundle/
     # so asserts use the same layout as the existing render integ tests.
     bundle_staging = Path(tempfile.mkdtemp(prefix="c4d-submitter-ui-"))
+    plugin_diag_log = bundle_staging / "plugin-diag.log"
     log(f"bundle staging dir: {bundle_staging}")
     try:
         with override_job_history_dir(bundle_staging):
-            # Pass the scene path via env var on all platforms so the
-            # PluginMessage hook loads it with LoadDocument before
-            # opening the submitter. C4DPL_PROGRAM_STARTED fires before
-            # C4D processes argv files, so without this the active
-            # document has no path when the submitter opens.
+            # Where the sidecar plugin writes its diagnostics (read back on
+            # failure in the finally block below).
+            env["DEADLINE_CLOUD_DIAG_LOG"] = str(plugin_diag_log)
+            # Pass the scene path via env var on all platforms so the sidecar
+            # plugin loads it with LoadDocument before opening the submitter.
+            # C4DPL_PROGRAM_STARTED fires before C4D processes argv files, so
+            # without this the active document has no path when the submitter
+            # opens.
             env["DEADLINE_CLOUD_SCENE_PATH"] = str(scene_path)
 
             if sys.platform == "darwin":
@@ -211,8 +241,8 @@ def test_integ(
                 app = xa11y.App.by_pid(proc.pid, timeout=_C4D_BOOT_TIMEOUT_S)
                 log("xa11y attached to Cinema 4D")
 
-                # The plugin opens the submitter automatically at load time
-                # via DEADLINE_CLOUD_AUTO_OPEN_SUBMITTER=1. Where the dialog
+                # The sidecar plugin opens the submitter automatically once C4D
+                # finishes starting (C4DPL_PROGRAM_STARTED). Where the dialog
                 # appears in the accessibility tree is platform-specific:
                 #   - Windows UIA: Qt registers each dialog as a separate
                 #     top-level UIA app sharing the C4D pid.
@@ -332,6 +362,7 @@ def test_integ(
                         log(f"  copied {src.name}")
             finally:
                 kill_proc(proc)
+                _dump_plugin_diag_log(plugin_diag_log)
     finally:
         rmtree(bundle_staging, ignore_errors=True)
         log(f"removed staging dir: {bundle_staging}")

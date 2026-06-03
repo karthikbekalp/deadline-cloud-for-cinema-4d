@@ -1,0 +1,118 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+"""Test-only Cinema 4D plugin that auto-opens the submitter for the xa11y integ test.
+
+This plugin is NEVER shipped to customers. test/integ_xa11y/test_cinema4d.py puts
+this directory on ``g_additionalModulePath`` so Cinema 4D loads it alongside the
+real, unmodified ``deadline_cloud_extension/DeadlineCloud.pyp``. Keeping the test
+hook here (rather than in the shipped plugin) means the test exercises the real
+plugin exactly as a customer would, while no test-only code reaches production.
+
+Once the application has finished starting (``C4DPL_PROGRAM_STARTED``) this plugin:
+
+1. Strips botocore's ``management.`` host prefix so the submitter's AWS calls reach
+   the in-process 127.0.0.1 mock backend instead of ``management.127.0.0.1``.
+2. Loads the test scene named by ``DEADLINE_CLOUD_SCENE_PATH`` and makes it the
+   active document. Cinema 4D ignores argv file arguments on macOS (files only
+   arrive via Apple Events), so the scene is passed by env var and opened here,
+   giving the submitter a document with a valid path.
+3. Opens the real submitter via ``c4d.CallCommand(SUBMITTER_PLUGIN_ID)``, which
+   dispatches into the shipped plugin's registered command — the same entry point
+   a user hits by clicking ``Extensions > AWS Deadline Cloud Submitter``.
+
+The test then drives the resulting Qt dialog with xa11y.
+"""
+import os
+import traceback
+
+import c4d
+
+# Must match PLUGIN_ID in deadline_cloud_extension/DeadlineCloud.pyp. Duplicated as
+# a literal so this test fixture needs no import from the shipped plugin.
+SUBMITTER_PLUGIN_ID = 1064358
+
+
+def _diag(msg):
+    """Append a diagnostic line to the file named by ``DEADLINE_CLOUD_DIAG_LOG``.
+
+    Cinema 4D's stdout is detached from pytest's, so the test points this env var
+    at a file under its staging dir and reads it back to surface failures. The
+    test owns the path, so it is cross-platform; a no-op when the var is unset.
+    """
+    log_path = os.environ.get("DEADLINE_CLOUD_DIAG_LOG")
+    if not log_path:
+        return
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"{msg}\n")
+    except Exception:
+        pass
+
+
+def _strip_botocore_host_prefix():
+    """Drop the ``management.`` host prefix botocore injects on every Deadline API
+    call so requests hit the 127.0.0.1 mock rather than management.127.0.0.1.
+
+    Done here (not at import time) because the submitter's dependencies are not on
+    sys.path until Cinema 4D finishes initializing.
+    """
+    try:
+        import botocore.awsrequest as awsrequest
+
+        original_urljoin = awsrequest._urljoin
+
+        def _urljoin_without_host_prefix(endpoint_url, url_path, host_prefix):
+            return original_urljoin(endpoint_url, url_path, None)
+
+        awsrequest._urljoin = _urljoin_without_host_prefix
+        _diag("botocore host-prefix patch applied")
+    except Exception as e:
+        _diag(f"botocore host-prefix patch failed: {e!r}")
+
+
+def _load_active_scene(scene_path):
+    """Load ``scene_path`` and set it as the active document so the submitter sees
+    a real document with a valid path."""
+    _diag(f"loading scene {scene_path}")
+    try:
+        doc = c4d.documents.LoadDocument(
+            scene_path, c4d.SCENEFILTER_OBJECTS | c4d.SCENEFILTER_MATERIALS
+        )
+        if doc:
+            c4d.documents.InsertBaseDocument(doc)
+            c4d.documents.SetActiveDocument(doc)
+            c4d.EventAdd()
+            _diag("scene loaded and set as active")
+        else:
+            _diag(f"LoadDocument returned None for {scene_path}")
+    except Exception as e:
+        _diag(f"LoadDocument raised: {e!r}\n{traceback.format_exc()}")
+
+
+def _open_submitter():
+    """Dispatch into the real shipped plugin's submitter command."""
+    active = c4d.documents.GetActiveDocument()
+    _diag(
+        f"active doc = {active.GetDocumentName() if active else None}, "
+        f"path = {active.GetDocumentPath() if active else None}"
+    )
+    _diag(f"opening submitter via CallCommand({SUBMITTER_PLUGIN_ID})")
+    try:
+        rc = c4d.CallCommand(SUBMITTER_PLUGIN_ID)
+        _diag(f"CallCommand returned: {rc!r}")
+    except Exception as e:
+        _diag(f"CallCommand raised: {e!r}\n{traceback.format_exc()}")
+
+
+def PluginMessage(id, data):
+    """Cinema 4D lifecycle hook. We act on C4DPL_PROGRAM_STARTED, fired once the
+    application is fully initialized, to drive the submitter for the integ test."""
+    if id == c4d.C4DPL_PROGRAM_STARTED:
+        _diag("C4DPL_PROGRAM_STARTED: auto-opening submitter for integ test")
+        _strip_botocore_host_prefix()
+
+        scene_path = os.environ.get("DEADLINE_CLOUD_SCENE_PATH", "")
+        if scene_path:
+            _load_active_scene(scene_path)
+
+        _open_submitter()
+    return True
