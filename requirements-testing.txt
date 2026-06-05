@@ -14,4 +14,4 @@ openjd-cli == 0.7.*
 fonttools >= 4.0.0
 # Drives the real submitter dialog via the OS accessibility tree.
 # Used by test/integ/submitter_ui/.
-xa11y >= 0.7, < 1.0
+xa11y >= 0.7

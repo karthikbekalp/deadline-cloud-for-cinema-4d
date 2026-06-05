@@ -142,6 +142,10 @@ def test_integ(
             - openjd check reporting a non-success status
             - openjd run failing for any step
     """
+    # Fail fast if either plugin file is missing — most likely because someone
+    # moved or renamed them without updating the path constants above. Without
+    # these guards a missing .pyp surfaces only as an opaque multi-minute
+    # dialog-visible timeout (C4D boots, but the submitter never opens).
     assert _REAL_PLUGIN_FILE.is_file(), f"DeadlineCloud.pyp not found at {_REAL_PLUGIN_FILE}"
     assert (
         _AUTO_OPEN_PLUGIN_FILE.is_file()

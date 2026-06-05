@@ -302,7 +302,7 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
 
     prefix_path = os.path.abspath(expected_job_bundle_dir_path).split(
         "deadline-cloud-for-cinema-4d"
-    )[0]
+    )[0].rstrip("/\\")
 
     expected_files = {f.name for f in expected_job_bundle_dir_path.glob("*") if f.is_file()}
     generated_files = {f.name for f in generated_job_bundle_dir_path.glob("*") if f.is_file()}

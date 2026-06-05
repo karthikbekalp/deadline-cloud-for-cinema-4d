@@ -2,7 +2,7 @@
  "parameterValues": [
   {
    "name": "Cinema4DFile",
-   "value": "PATH_TO_BE_REPLACEDdeadline-cloud-for-cinema-4d/test/integ_xa11y/test_scenes/cube/generated_bundle/cube.c4d"
+   "value": "PATH_TO_BE_REPLACED/deadline-cloud-for-cinema-4d/test/integ_xa11y/test_scenes/cube/generated_bundle/cube.c4d"
   },
   {
    "name": "SubmitterIntegrationVersion",
@@ -10,7 +10,7 @@
   },
   {
    "name": "OutputPath",
-   "value": "PATH_TO_BE_REPLACEDdeadline-cloud-for-cinema-4d/test/integ_xa11y/test_scenes/cube/generated_bundle/renders/cube"
+   "value": "PATH_TO_BE_REPLACED/deadline-cloud-for-cinema-4d/test/integ_xa11y/test_scenes/cube/generated_bundle/renders/cube"
   },
   {
    "name": "MultiPassPath",

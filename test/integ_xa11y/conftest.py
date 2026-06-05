@@ -28,22 +28,12 @@ _C4D_DEFAULT_PATHS = {
     "2026": {
         "win32": Path(r"C:\Program Files\Maxon Cinema 4D 2026"),
         "darwin": Path("/Applications/Maxon Cinema 4D 2026"),
-        "linux": Path("/opt/maxon/cinema4d-2026"),
     },
     "2025": {
         "win32": Path(r"C:\Program Files\Maxon Cinema 4D 2025"),
         "darwin": Path("/Applications/Maxon Cinema 4D 2025"),
-        "linux": Path("/opt/maxon/cinema4d-2025"),
     },
 }
-
-
-def _platform_key() -> str:
-    if sys.platform == "win32":
-        return "win32"
-    if sys.platform == "darwin":
-        return "darwin"
-    return "linux"
 
 
 @pytest.fixture
@@ -54,29 +44,33 @@ def cinema4d_location() -> Path:
     1. C4D_LOCATION env var (explicit path set by the engineer)
     2. C4D_VERSION env var (CI-only — derives path from version + platform)
     3. Scan known default paths (fallback for local dev without any env vars)
+
+    Only Windows and macOS are supported (sys.platform "win32"/"darwin").
+    Any other platform has no entry in _C4D_DEFAULT_PATHS and falls through
+    to the EnvironmentError below.
     """
     if "C4D_LOCATION" in os.environ:
         return Path(os.environ["C4D_LOCATION"])
 
-    platform_key = _platform_key()
-
     version = os.environ.get("C4D_VERSION")
     if version and version in _C4D_DEFAULT_PATHS:
-        default_path = _C4D_DEFAULT_PATHS[version][platform_key]
-        if default_path.exists():
+        default_path = _C4D_DEFAULT_PATHS[version].get(sys.platform)
+        if default_path and default_path.exists():
             print(f"Using Cinema 4D {version} at: {default_path}")
             os.environ["C4D_LOCATION"] = str(default_path)
             return default_path
 
+    # Fallback: scan all known default paths for local dev without env vars
     for v in _C4D_DEFAULT_PATHS:
-        default_path = _C4D_DEFAULT_PATHS[v][platform_key]
-        if default_path.exists():
+        default_path = _C4D_DEFAULT_PATHS[v].get(sys.platform)
+        if default_path and default_path.exists():
             print(f"Found Cinema 4D at default path: {default_path}")
             os.environ["C4D_LOCATION"] = str(default_path)
             return default_path
 
     raise EnvironmentError(
-        "Cinema 4D location not found. Set C4D_LOCATION to the Cinema 4D install directory, "
+        "Cinema 4D location not found. This test runs on Windows and macOS only. "
+        "Set C4D_LOCATION to the Cinema 4D install directory, "
         "or set C4D_VERSION to a supported version (e.g., 2025, 2026)."
     )
 
@@ -84,8 +78,11 @@ def cinema4d_location() -> Path:
 @pytest.fixture(autouse=True)
 def _set_c4d_python_path():
     """Set C4DPYTHONPATH311 so c4dpy can find packages installed in the hatch venv."""
+    # Include the project src/ dir (for editable install) and site-packages (for dependencies like PySide6)
     project_src = str(Path(__file__).parent.parent.parent / "src")
     site_pkgs = site.getsitepackages()
+    # pywin32's win32file.pyd lives in site-packages/win32/ which c4dpy can't find
+    # via .pth files, so add it explicitly
     win32_paths: list[str] = []
     for p in site_pkgs:
         for subdir in ["win32", "win32/lib"]:
@@ -100,6 +97,8 @@ def _set_c4d_python_path():
     )
     print(f"C4DPYTHONPATH311={os.environ.get('C4DPYTHONPATH311')}")
 
+    # pywin32 DLLs (pywintypes311.dll, pythoncom311.dll) live in site-packages/pywin32_system32/
+    # and must be on PATH for win32file.pyd to load
     for p in site_pkgs:
         pywin32_sys = Path(p) / "pywin32_system32"
         if pywin32_sys.exists():

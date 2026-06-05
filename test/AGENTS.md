@@ -105,9 +105,15 @@ directly.
 Once we're confident in this test, the plan is to delete `test/integ/`
 and rename this folder to `test/integ/`.
 
-The test launches the Cinema 4D GUI binary, points it at the real
-`deadline_cloud_extension/DeadlineCloud.pyp` via `g_additionalModulePath`
-(no test-only plugin), clicks `Extensions > AWS Deadline Cloud Submitter`,
+The test launches the Cinema 4D GUI binary with two plugin directories on
+`g_additionalModulePath`: the real, unmodified
+`deadline_cloud_extension/DeadlineCloud.pyp` and a test-only sidecar plugin
+(`test/integ_xa11y/fixtures/auto_open_submitter/AutoOpenSubmitter.pyp`). On
+`C4DPL_PROGRAM_STARTED` the sidecar loads the test scene and opens the real
+submitter via `c4d.CallCommand(SUBMITTER_PLUGIN_ID)` — the same command
+`Extensions > AWS Deadline Cloud Submitter` invokes. Keeping the test hook in
+the sidecar means the shipped plugin stays unmodified and is exercised exactly
+as a customer would. The test then drives the resulting Qt dialog with xa11y,
 clicks `Export bundle`, copies the resulting bundle flat into
 `<scene>/generated_bundle/`, then runs `openjd check` and `openjd run`
 against it — same final assertions as the existing test.
