@@ -272,66 +272,106 @@ def _normalize_submitter_integration_version(content: str) -> str:
     return content
 
 
+
 def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     expected_job_bundle_dir_path: Path, generated_job_bundle_dir_path: Path
 ) -> None:
-    """Assert the generated job bundle matches the expected bundle byte-for-byte
-    after a fixed set of normalizations (PATH_TO_BE_REPLACED, conda + submitter
-    versions, template jobEnvironments stripped)."""
-    results: dict[str, list[str]] = {"different_content": [], "identical_files": []}
+    """
+    Assert that the generated job bundle matches with the expected job bundle.
+    """
 
+    results: dict[str, list[str]] = {
+        "different_content": [],
+        "identical_files": [],
+    }
+
+    # So that we can replace PATH_TO_BE_REPLACED in the expected job bundle.
+    # The fixtures store the placeholder as "PATH_TO_BE_REPLACED/deadline-..."
+    # (the separator after the placeholder belongs to the fixture), but
+    # split(...)[0] keeps the trailing separator. Strip it so the substitution
+    # doesn't produce a doubled separator ("Github Repos//deadline-..."). On
+    # Windows the doubled separator was masked because replace_backslashes
+    # collapses "\\+" to a single "/", but on POSIX the doubled "/" survived.
     prefix_path = os.path.abspath(expected_job_bundle_dir_path).split(
         "deadline-cloud-for-cinema-4d"
     )[0].rstrip("/\\")
 
-    expected_files = {f.name for f in expected_job_bundle_dir_path.glob("*") if f.is_file()}
-    generated_files = {f.name for f in generated_job_bundle_dir_path.glob("*") if f.is_file()}
-    common_files = expected_files.intersection(generated_files)
+    # Get list of files in both directories
+    expected_job_bundle_files = set(
+        f.name for f in expected_job_bundle_dir_path.glob("*") if f.is_file()
+    )
+    generated_job_bundle_files = set(
+        f.name for f in generated_job_bundle_dir_path.glob("*") if f.is_file()
+    )
+
+    # Compare contents of files that exist in both directories
+    common_files = expected_job_bundle_files.intersection(generated_job_bundle_files)
 
     for file in common_files:
+        file1_path = expected_job_bundle_dir_path / file
+        file2_path = generated_job_bundle_dir_path / file
+
+        # Read files and compare their contents directly
         with (
-            open(expected_job_bundle_dir_path / file, "r", encoding="utf-8") as f1,
-            open(generated_job_bundle_dir_path / file, "r", encoding="utf-8") as f2,
+            open(file1_path, "r", encoding="utf-8") as f1,
+            open(file2_path, "r", encoding="utf-8") as f2,
         ):
-            content1 = f1.read().strip().replace("\r\n", "\n")
-            content2 = f2.read().strip().replace("\r\n", "\n")
+            content1 = f1.read().strip()  # strip() removes trailing whitespace
+            content2 = f2.read().strip()
 
-            content1 = content1.replace("PATH_TO_BE_REPLACED", prefix_path)
-            content1 = replace_backslashes(content1)
-            content2 = replace_backslashes(content2)
+        # Normalize line endings
+        content1 = content1.replace("\r\n", "\n")
+        content2 = content2.replace("\r\n", "\n")
 
-            if file == "parameter_values.yaml":
-                content1 = _normalize_conda_packages_version(content1)
-                content2 = _normalize_conda_packages_version(content2)
-                content1 = _normalize_submitter_integration_version(content1)
-                content2 = _normalize_submitter_integration_version(content2)
+        # Special handling for parameter_values.yaml to normalize version differences.
+        # Done on the raw YAML text because the regexes rely on the YAML key/value layout.
+        if file == "parameter_values.yaml":
+            content1 = _normalize_conda_packages_version(content1)
+            content2 = _normalize_conda_packages_version(content2)
+            content1 = _normalize_submitter_integration_version(content1)
+            content2 = _normalize_submitter_integration_version(content2)
 
-            if file == "template.yaml":
-                content1 = _strip_job_environments_from_template(content1)
-                content2 = _strip_job_environments_from_template(content2)
+        # For YAML files, parse the document and re-serialize it as single-line JSON
+        # BEFORE normalizing path separators. Parsing first lets the YAML parser
+        # resolve multi-line double-quoted scalars correctly: PyYAML folds long,
+        # space-free paths using escaped line breaks (a trailing "\" at the fold).
+        # If replace_backslashes ran on the raw multi-line YAML, it would turn those
+        # line-continuation backslashes into "/", changing the parsed value depending
+        # on where each file happened to wrap -- which is what broke the non-ASCII
+        # path tests. JSON is emitted on a single line, so there are no line
+        # continuations left for replace_backslashes to corrupt.
+        if file in ("parameter_values.yaml", "asset_references.yaml"):
+            content1 = json.dumps(safe_load(content1), sort_keys=True)
+            content2 = json.dumps(safe_load(content2), sort_keys=True)
 
-            if file in ("parameter_values.yaml", "asset_references.yaml"):
-                if safe_load(content1) == safe_load(content2):
-                    results["identical_files"].append(file)
-                else:
-                    results["different_content"].append(file)
-                    print("\n".join(unified_diff(
-                        content1.splitlines(), content2.splitlines(), lineterm=""
-                    )))
-            elif content1 == content2:
-                results["identical_files"].append(file)
-            else:
-                results["different_content"].append(file)
-                print("\n".join(unified_diff(
-                    content1.splitlines(), content2.splitlines(), lineterm=""
-                )))
+        # Replace the prefix path in the expected job bundle, then normalize separators.
+        content1 = content1.replace("PATH_TO_BE_REPLACED", prefix_path)
+        content1 = replace_backslashes(content1)
+        content2 = replace_backslashes(content2)
+
+        # Special handling for template.yaml to strip job environments.
+        # Job environments can contain code that changes frequently
+        # We don't want to update all tests every time there's a
+        # small change in the job environment code, so we strip it before comparison.
+        # We check for the code comparison in our unit tests which should be sufficient.
+        if file == "template.yaml":
+            content1 = _strip_job_environments_from_template(content1)
+            content2 = _strip_job_environments_from_template(content2)
+
+        if content1 == content2:
+            results["identical_files"].append(file)
+        else:
+            results["different_content"].append(file)
+            diff = "\n".join(
+                unified_diff(content1.splitlines(), content2.splitlines(), lineterm="")
+            )
+            print(diff)
 
     assert len(results["different_content"]) == 0
     assert len(results["identical_files"]) == 3
     assert "template.yaml" in results["identical_files"]
     assert "parameter_values.yaml" in results["identical_files"]
     assert "asset_references.yaml" in results["identical_files"]
-
 
 def _find_actual_image(actual_image_directory: Path, expected_image_name: str) -> Path:
     """Find the actual image, handling underscore-sanitization differences."""
