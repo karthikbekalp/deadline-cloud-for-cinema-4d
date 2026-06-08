@@ -125,29 +125,31 @@ def build_submitter_pythonpath(repo_root: Path) -> str:
     return os.pathsep.join(out)
 
 
-def build_cube_scene(c4dpy_location: Path, scene_script_location: Path, scene_dir: Path) -> Path:
-    """Run the scene-building script inside c4dpy. Returns the saved .c4d path."""
-    os.makedirs(scene_dir, exist_ok=True)
-    log(f"running c4dpy: {c4dpy_location} {scene_script_location} -> {scene_dir}")
+def build_cinema4d_scene(
+    c4dpy_location: Path,
+    scene_script_location: Path,
+    scene_dir: Path,
+    scene_name: str,
+) -> Path:
+    """Run the scene-building script inside c4dpy. Returns the saved .c4d path.
+
+    scene_dir is expected to already exist (the caller creates it), and the
+    script is expected to save the scene as scene_name within it.
+    """
     result = subprocess.run(
         [str(c4dpy_location), str(scene_script_location), str(scene_dir)],
         capture_output=True,
         text=True,
         check=False,
     )
-    print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
     # c4dpy frequently exits non-zero on shutdown after a successful script
     # (Windows, post-script teardown). The bundle file existence is the
     # source of truth — same approach as the crowecawcaw e2e driver.
-    log(f"c4dpy exit code: {result.returncode} (treating bundle file as source of truth)")
-    scene = scene_dir / "cube.c4d"
+    scene = scene_dir / scene_name
     assert scene.is_file(), (
         f"scene.py did not save expected file at {scene} "
         f"(c4dpy exit code {result.returncode})"
     )
-    log(f"cube scene saved: {scene} ({scene.stat().st_size} bytes)")
     return scene
 
 

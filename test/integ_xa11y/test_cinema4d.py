@@ -14,7 +14,7 @@ from .utils import (
     assert_expected_job_bundle_and_generated_job_bundle_are_equal,
     assert_is_valid_job_bundle,
     assert_openjd_run_with_cinema4d_successful,
-    build_cube_scene,
+    build_cinema4d_scene,
     build_submitter_pythonpath,
     kill_proc,
     log,
@@ -112,12 +112,16 @@ def _prepare_generated_bundle_dir(
     return test_scene_folder, job_bundle_generated
 
 
-def _build_test_scene(
+def _build_cinema4d_scene(
     cinema4d_location: Path,
     test_scene_folder: Path,
     job_bundle_generated: Path,
+    test_name: str,
 ) -> Path:
-    """Build the cube test scene with c4dpy and return the saved scene path.
+    """Build the parametrized test scene with c4dpy and return the saved
+    scene path. The scene is whichever one lives under test_scene_folder
+    (selected by test_name); its scene/scene.py is run by c4dpy and is
+    expected to save the scene as <test_name>.c4d.
 
     The scene is saved into generated_bundle/ rather than scene/ so that
     render_data RDATA_PATH = "renders/$prj" (resolved against
@@ -127,7 +131,9 @@ def _build_test_scene(
     """
     c4dpy_location = resolve_c4d_exe(cinema4d_location, "c4dpy")
     test_scene_script = test_scene_folder / "scene" / "scene.py"
-    return build_cube_scene(c4dpy_location, test_scene_script, job_bundle_generated)
+    return build_cinema4d_scene(
+        c4dpy_location, test_scene_script, job_bundle_generated, f"{test_name}.c4d"
+    )
 
 
 def _build_launch_env(
@@ -193,7 +199,7 @@ def _launch_cinema4d(
     """Launch Cinema 4D with the submitter + sidecar plugins.
 
     On macOS we don't pass the scene on argv (the sidecar loads it via
-    DEADLINE_CLOUD_SCENE_PATH); on Windows/Linux we pass it on argv too.
+    DEADLINE_CLOUD_SCENE_PATH); on Windows we pass it on argv too.
     """
     if sys.platform == "darwin":
         log(f"launching Cinema 4D (mac): {cinema4d_gui_exe}")
@@ -416,59 +422,6 @@ def _export_job_bundle_via_submitter(
         log(f"removed staging dir: {bundle_staging}")
 
 
-def _assert_bundle_passes_openjd_check(job_bundle_generated: Path) -> None:
-    """Validate the exported bundle's structure with openjd check."""
-    log("running openjd check on the exported bundle")
-    assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
-
-
-def _assert_generated_bundle_matches_expected(
-    test_scene_folder: Path, job_bundle_generated: Path
-) -> None:
-    """Compare the generated bundle against the platform-appropriate
-    expected_job_bundle/."""
-    log("comparing generated bundle against expected_job_bundle/")
-    if sys.platform == "darwin":
-        expected_job_bundle = test_scene_folder / "expected_job_bundle_darwin"
-    else:
-        expected_job_bundle = test_scene_folder / "expected_job_bundle"
-    assert_expected_job_bundle_and_generated_job_bundle_are_equal(
-        expected_job_bundle, job_bundle_generated
-    )
-
-
-def _assert_render_output_matches_expected(
-    cinema4d_location: Path,
-    test_scene_folder: Path,
-    job_bundle_generated: Path,
-) -> None:
-    """Run the bundle via openjd and compare rendered output against
-    expected_job_output/.
-
-    The adaptor portion (openjd run + render compare) only runs on Windows
-    and Linux. On macOS we stop after bundle comparison: the goal of the
-    Mac test is submitter coverage, and the render path needs Conda-managed
-    cinema4d-openjd which we don't ship for darwin yet.
-    """
-    if sys.platform == "darwin":
-        log("skipping openjd run + render compare on macOS (submitter-only)")
-        return
-
-    log("running openjd run with Cinema 4D Commandline for each step")
-    assert_openjd_run_with_cinema4d_successful(
-        cinema4d_location,
-        job_bundle_generated / "template.yaml",
-        job_bundle_generated / "parameter_values.yaml",
-    )
-
-    log("comparing rendered output against expected_job_output/")
-    expected_job_output = test_scene_folder / "expected_job_output"
-    assert_all_images_close(
-        expected_job_output / "renders",
-        job_bundle_generated / "renders",
-    )
-
-
 @pytest.mark.parametrize("test_name", ["cube"])
 def test_integ(
     cinema4d_location: Path,
@@ -503,8 +456,8 @@ def test_integ(
         test_scenes_folder_location, test_name
     )
 
-    scene_path = _build_test_scene(
-        cinema4d_location, test_scene_folder, job_bundle_generated
+    scene_path = _build_cinema4d_scene(
+        cinema4d_location, test_scene_folder, job_bundle_generated, test_name
     )
 
     _export_job_bundle_via_submitter(
@@ -514,11 +467,29 @@ def test_integ(
         job_bundle_generated=job_bundle_generated,
     )
 
-    _assert_bundle_passes_openjd_check(job_bundle_generated)
-    _assert_generated_bundle_matches_expected(test_scene_folder, job_bundle_generated)
-    _assert_render_output_matches_expected(
-        cinema4d_location, test_scene_folder, job_bundle_generated
+    assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
+
+    # Compare against the platform-appropriate expected bundle (the _darwin
+    # variant on macOS).
+    suffix = "_darwin" if sys.platform == "darwin" else ""
+    assert_expected_job_bundle_and_generated_job_bundle_are_equal(
+        test_scene_folder / f"expected_job_bundle{suffix}", job_bundle_generated
     )
+
+    # Run the bundle via openjd and compare rendered output. This adaptor
+    # portion only runs on Windows; on macOS the test is submitter-only (the
+    # render path needs Conda-managed cinema4d-openjd, which we don't ship for
+    # darwin yet).
+    if sys.platform != "darwin":
+        assert_openjd_run_with_cinema4d_successful(
+            cinema4d_location,
+            job_bundle_generated / "template.yaml",
+            job_bundle_generated / "parameter_values.yaml",
+        )
+        assert_all_images_close(
+            test_scene_folder / "expected_job_output" / "renders",
+            job_bundle_generated / "renders",
+        )
 
     # Clean up if the test was successful
     rmtree(job_bundle_generated, ignore_errors=True)

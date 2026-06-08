@@ -35,7 +35,7 @@ pytest (parent process)
   │     ├─ starts mock STS HTTP server        (127.0.0.1:<ephemeral>)
   │     └─ writes a temp deadline-client config pointing at them
   │
-  ├─ build_cube_scene()  ── runs c4dpy scene.py ──▶ cube.c4d
+  ├─ build_cinema4d_scene()  ── runs c4dpy scene.py ──▶ cube.c4d
   │
   └─ launches Cinema 4D GUI (child process)
          │   env: AWS endpoints → mocks, two plugin dirs, python path + shim
@@ -60,8 +60,8 @@ pytest (parent process)
          │
          ├─ openjd check
          ├─ compare against expected_job_bundle/ (golden files)
-         ├─ openjd run  (Windows/Linux only)
-         └─ compare renders against expected_job_output/ (Windows/Linux only)
+         ├─ openjd run  (Windows only)
+         └─ compare renders against expected_job_output/ (Windows only)
 ```
 
 ## The files, and what each is responsible for
@@ -79,7 +79,7 @@ pytest (parent process)
 
 ## Walkthrough of the flow
 
-### 1. Build the scene (`build_cube_scene` → `scene.py`)
+### 1. Build the scene (`build_cinema4d_scene` → `scene.py`)
 
 `scene.py` runs inside **`c4dpy`** (Cinema 4D's headless Python). It builds a
 cube, sets the render output to `renders/$prj`, single frame, PNG, Standard/
@@ -192,8 +192,8 @@ assertions expect.
 - `assert_is_valid_job_bundle` → `openjd check` returns `success`.
 - `assert_expected_job_bundle_and_generated_job_bundle_are_equal` → compares the
   three bundle files after normalizations (see below).
-- On Windows/Linux only: `assert_openjd_run_with_cinema4d_successful` runs each
-  step via `openjd run` against C4D Commandline, then `assert_all_images_close`
+- On Windows only: `assert_openjd_run_with_cinema4d_successful` runs each step
+  via `openjd run` against C4D Commandline, then `assert_all_images_close`
   compares render dimensions.
 - macOS stops after bundle comparison — the render path needs Conda-managed
   `cinema4d-openjd`, which isn't shipped for darwin yet.
@@ -217,12 +217,12 @@ The final assertion requires exactly the three expected files
 
 ## Platform support matrix
 
-| Stage | Windows | macOS | Linux |
-|-------|:-------:|:-----:|:-----:|
-| Scene build (`c4dpy`) | ✅ | ✅ | ✅ |
-| Launch + drive UI (xa11y) | ✅ | ✅ | ⚠️ untested |
-| Bundle comparison | ✅ | ✅ | ✅ |
-| `openjd run` + render compare | ✅ | ❌ skipped | ✅ |
+| Stage | Windows | macOS |
+|-------|:-------:|:-----:|
+| Scene build (`c4dpy`) | ✅ | ✅ |
+| Launch + drive UI (xa11y) | ✅ | ✅ |
+| Bundle comparison | ✅ | ✅ |
+| `openjd run` + render compare | ✅ | ❌ skipped |
 
 **Known caveat (from `test/AGENTS.md`):** Windows SMF workers run in Session 0
 with no interactive desktop, so UI Automation returns nothing there. This test
