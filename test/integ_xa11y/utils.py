@@ -50,14 +50,7 @@ def assert_openjd_run_with_cinema4d_successful(
     params_path: Path,
 ) -> None:
     """Run each step in the template via `openjd run` against Cinema 4D Commandline."""
-    if sys.platform == "win32":
-        c4d_exe = cinema4d_location / "Commandline.exe"
-    elif sys.platform == "darwin":
-        c4d_exe = (
-            cinema4d_location / "Commandline.app" / "Contents" / "MacOS" / "Commandline"
-        )
-    else:
-        c4d_exe = cinema4d_location / "bin" / "Commandline"
+    c4d_exe = resolve_c4d_exe(cinema4d_location, "Commandline")
     test_env = {
         "C4D_COMMANDLINE_EXECUTABLE": str(c4d_exe),
         "CINEMA4D_ADAPTOR_TESTING": "True",
@@ -97,32 +90,17 @@ def assert_openjd_run_with_cinema4d_successful(
             assert output.returncode == 0
 
 
-def resolve_c4d_gui_exe(cinema4d_location: Path) -> Path:
-    """Path to the GUI Cinema 4D binary (not Commandline, not c4dpy)."""
+def resolve_c4d_exe(cinema4d_location: Path, name: str) -> Path:
+    """Resolve a Cinema 4D executable by name (e.g. "Cinema 4D", "c4dpy", "Commandline")."""
     if sys.platform == "win32":
-        exe = cinema4d_location / "Cinema 4D.exe"
+        exe = cinema4d_location / f"{name}.exe"
     elif sys.platform == "darwin":
-        # Maxon ships everything as .app bundles on Mac.
-        exe = cinema4d_location / "Cinema 4D.app" / "Contents" / "MacOS" / "Cinema 4D"
+        exe = cinema4d_location / f"{name}.app" / "Contents" / "MacOS" / name
     else:
-        exe = cinema4d_location / "Cinema 4D"
+        exe = cinema4d_location / name
     if not exe.exists():
-        raise FileNotFoundError(f"Cinema 4D GUI executable not found at {exe}")
-    log(f"resolved C4D GUI: {exe}")
-    return exe
-
-
-def resolve_c4dpy_exe(cinema4d_location: Path) -> Path:
-    """Path to the c4dpy binary used to run scene-build scripts."""
-    if sys.platform == "win32":
-        exe = cinema4d_location / "c4dpy.exe"
-    elif sys.platform == "darwin":
-        exe = cinema4d_location / "c4dpy.app" / "Contents" / "MacOS" / "c4dpy"
-    else:
-        exe = cinema4d_location / "c4dpy"
-    if not exe.exists():
-        raise FileNotFoundError(f"c4dpy executable not found at {exe}")
-    log(f"resolved c4dpy: {exe}")
+        raise FileNotFoundError(f"{name} executable not found at {exe}")
+    log(f"resolved {name}: {exe}")
     return exe
 
 
@@ -380,3 +358,8 @@ def assert_all_images_close(expected_image_directory: Path, actual_image_directo
         assert actual.shape == expected.shape, (
             f"Image dimensions differ: {actual.shape} vs {expected.shape}"
         )
+
+        # Check that the two images are the same within a tolerance.
+        # It's normal for there to be noise in an output image, so it is unlikely that two
+        # renders will be exactly the same.
+        assert np.allclose(actual, expected, atol=2)

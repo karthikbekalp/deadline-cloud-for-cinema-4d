@@ -14,6 +14,8 @@ from typing import Iterator
 
 from pathlib import Path
 
+from .utils import resolve_c4d_exe
+
 from .mock_deadline_backend import (
     MockDeadlineFarm,
     start_deadline_server,
@@ -73,6 +75,21 @@ def cinema4d_location() -> Path:
         "Set C4D_LOCATION to the Cinema 4D install directory, "
         "or set C4D_VERSION to a supported version (e.g., 2025, 2026)."
     )
+
+
+@pytest.fixture
+def c4d_gui_exe(cinema4d_location: Path) -> Path:
+    return resolve_c4d_exe(cinema4d_location, "Cinema 4D")
+
+
+@pytest.fixture
+def c4dpy_exe(cinema4d_location: Path) -> Path:
+    return resolve_c4d_exe(cinema4d_location, "c4dpy")
+
+
+@pytest.fixture
+def commandline_exe(cinema4d_location: Path) -> Path:
+    return resolve_c4d_exe(cinema4d_location, "Commandline")
 
 
 @pytest.fixture(autouse=True)

@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 from shutil import copy2, rmtree
 
@@ -20,8 +19,7 @@ from .utils import (
     kill_proc,
     log,
     override_job_history_dir,
-    resolve_c4d_gui_exe,
-    resolve_c4dpy_exe,
+    resolve_c4d_exe,
     wait_for_bundle,
 )
 
@@ -119,8 +117,7 @@ def test_integ(
     2. Launches Cinema 4D with the real submitter plugin and the test-only
        sidecar plugin both on g_additionalModulePath
     3. The sidecar plugin, on C4DPL_PROGRAM_STARTED, loads the scene and opens
-       the real submitter via CallCommand (no simulated keystrokes — the
-       shipped plugin is unmodified)
+       the real submitter via CallCommand
     4. Drives the resulting Qt submitter dialog via xa11y locator
        (Export bundle button + success popup)
     5. Copies the exported job bundle into generated_bundle/
@@ -142,22 +139,14 @@ def test_integ(
             - openjd check reporting a non-success status
             - openjd run failing for any step
     """
-    # Fail fast if either plugin file is missing — most likely because someone
-    # moved or renamed them without updating the path constants above. Without
-    # these guards a missing .pyp surfaces only as an opaque multi-minute
-    # dialog-visible timeout (C4D boots, but the submitter never opens).
-    assert _REAL_PLUGIN_FILE.is_file(), f"DeadlineCloud.pyp not found at {_REAL_PLUGIN_FILE}"
-    assert (
-        _AUTO_OPEN_PLUGIN_FILE.is_file()
-    ), f"Auto-open sidecar plugin not found at {_AUTO_OPEN_PLUGIN_FILE}"
 
-    c4dpy_location = resolve_c4dpy_exe(cinema4d_location)
+    c4dpy_location = resolve_c4d_exe(cinema4d_location, "c4dpy")
     test_scene_folder_location = test_scenes_folder_location / test_name
     test_scene_script_location = test_scene_folder_location / "scene" / "scene.py"
     job_bundle_generated = test_scene_folder_location / "generated_bundle"
     os.makedirs(job_bundle_generated, exist_ok=True)
 
-    cinema4d_gui_exe = resolve_c4d_gui_exe(cinema4d_location)
+    cinema4d_gui_exe = resolve_c4d_exe(cinema4d_location, "Cinema 4D")
     # Save the scene into generated_bundle/ rather than scene/ so that
     # render_data RDATA_PATH = "renders/$prj" (resolved against
     # doc.GetDocumentPath()) lands renders inside generated_bundle/renders/,
