@@ -202,18 +202,15 @@ def _launch_cinema4d(
     DEADLINE_CLOUD_SCENE_PATH); on Windows we pass it on argv too.
     """
     if sys.platform == "darwin":
-        log(f"launching Cinema 4D (mac): {cinema4d_gui_exe}")
         proc = subprocess.Popen(
             [str(cinema4d_gui_exe)],
             env=env,
         )
     else:
-        log(f"launching Cinema 4D: {cinema4d_gui_exe} {scene_path}")
         proc = subprocess.Popen(
             [str(cinema4d_gui_exe), str(scene_path)],
             env=env,
         )
-    log(f"Cinema 4D launched, pid={proc.pid}")
     return proc
 
 

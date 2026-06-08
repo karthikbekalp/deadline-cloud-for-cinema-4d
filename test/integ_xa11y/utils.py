@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import numpy as np
 import PIL.Image
+from deadline.client.config import get_setting, set_setting
 from yaml import dump, safe_load
 
 
@@ -198,15 +199,11 @@ def override_job_history_dir(path: Path):
     """The submitter exports to settings.job_history_dir (a persistent
     deadline-client config setting). Override it for the duration of
     the test and restore the user's prior value on the way out."""
-    from deadline.client.config import get_setting, set_setting
-
     previous = get_setting("settings.job_history_dir")
-    log(f"override settings.job_history_dir: {previous!r} -> {str(path)!r}")
     set_setting("settings.job_history_dir", str(path))
     try:
         yield
     finally:
-        log(f"restore settings.job_history_dir -> {previous!r}")
         set_setting("settings.job_history_dir", previous)
 
 
