@@ -18,8 +18,8 @@ from .utils import resolve_c4d_exe
 
 from .mock_deadline_backend import (
     MockDeadlineFarm,
-    start_deadline_server,
-    start_sts_server,
+    start_heartbeat,
+    start_mock_servers_subprocess,
 )
 
 # Default install paths per version and platform.
@@ -160,8 +160,19 @@ def mock_deadline_farm() -> Iterator[dict]:
     farm_id = farm.farm_id
     queue_id = farm.queue_id
 
-    deadline_server, deadline_url = start_deadline_server(farm)
-    sts_server, sts_url = start_sts_server()
+    # EXPERIMENT (Phase A): run the mock servers in a SEPARATE PROCESS instead of
+    # background threads in this pytest process. The heartbeat proved the
+    # in-process servers get GIL-starved whenever the main thread is parked in an
+    # xa11y native wait. A separate process has its own GIL, so it should keep
+    # answering the submitter's API calls regardless of what xa11y is doing here.
+    servers, deadline_url, sts_url = start_mock_servers_subprocess(farm)
+
+    # DIAGNOSTIC: heartbeat still runs in THIS (parent) process. With the servers
+    # moved out, the parent threads will still show starvation gaps during xa11y
+    # waits -- that's expected and fine now; what matters is the child process
+    # keeps serving. The heartbeat lets us confirm the parent is still getting
+    # starved (proving the servers needed to move) while the test now passes.
+    stop_heartbeat = start_heartbeat()
 
     tmpdir = Path(tempfile.mkdtemp(prefix="c4d-mock-deadline-"))
     config_path = tmpdir / "deadline_config"
@@ -211,14 +222,14 @@ def mock_deadline_farm() -> Iterator[dict]:
             "env": env,
         }
     finally:
+        stop_heartbeat()
         if prev_config_env is None:
             os.environ.pop("DEADLINE_CONFIG_FILE_PATH", None)
         else:
             os.environ["DEADLINE_CONFIG_FILE_PATH"] = prev_config_env
-        deadline_server.shutdown()
-        deadline_server.server_close()
-        sts_server.shutdown()
-        sts_server.server_close()
+        # Tears down the out-of-process mock servers (terminates the child).
+        servers.shutdown()
+        servers.server_close()
         from shutil import rmtree
 
         rmtree(tmpdir, ignore_errors=True)

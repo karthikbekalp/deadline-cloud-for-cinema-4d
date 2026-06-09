@@ -48,6 +48,58 @@ def _diag(msg):
         pass
 
 
+def _install_diag_log_capture():
+    """DIAGNOSTIC: surface errors that the submitter dialog swallows.
+
+    on_export_bundle wraps its body in `except Exception: logger.exception(...)`
+    and then shows a QMessageBox.critical -- so when get_parameters() blows up
+    with "Internal C++ object (QLineEdit) already deleted" (a Qt object-lifetime
+    race: a parameter control was deleteLater()'d by an overlapping queue-env
+    rebuild_ui while Export was reading it), the traceback only goes to the
+    `deadline.client` logger, which lands in C4D's console -- detached from
+    pytest. We attach a handler that mirrors that logger into
+    DEADLINE_CLOUD_DIAG_LOG (which the test echoes back on teardown), and add a
+    sys.excepthook, so the real root cause shows up in the test output.
+    """
+    try:
+        import logging
+
+        log_path = os.environ.get("DEADLINE_CLOUD_DIAG_LOG")
+        if log_path:
+            handler = logging.FileHandler(log_path, encoding="utf-8")
+            handler.setLevel(logging.WARNING)
+            handler.setFormatter(
+                logging.Formatter("[deadline-logger %(levelname)s %(name)s] %(message)s")
+            )
+            # Capture only the deadline client logs at WARNING+ (where "Error
+            # saving bundle" and the swallowed traceback are emitted). botocore
+            # at DEBUG is far too noisy and buries the signal, so we do NOT
+            # attach to the root logger here.
+            lg = logging.getLogger("deadline")
+            lg.setLevel(logging.WARNING)
+            lg.addHandler(handler)
+        _diag("diag log capture installed (deadline logger WARNING+ -> diag file)")
+    except Exception as e:
+        _diag(f"diag log capture install failed: {e!r}")
+
+    # Also capture any genuinely-uncaught exceptions on the main thread.
+    try:
+        import sys
+
+        prev_hook = sys.excepthook
+
+        def _hook(exc_type, exc_value, exc_tb):
+            _diag(
+                "UNCAUGHT EXCEPTION:\n"
+                + "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            )
+            prev_hook(exc_type, exc_value, exc_tb)
+
+        sys.excepthook = _hook
+    except Exception as e:
+        _diag(f"excepthook install failed: {e!r}")
+
+
 def _strip_botocore_host_prefix():
     """Drop the ``management.`` host prefix botocore injects on every Deadline API
     call so requests hit the 127.0.0.1 mock rather than management.127.0.0.1.
@@ -108,6 +160,7 @@ def PluginMessage(id, data):
     application is fully initialized, to drive the submitter for the integ test."""
     if id == c4d.C4DPL_PROGRAM_STARTED:
         _diag("C4DPL_PROGRAM_STARTED: auto-opening submitter for integ test")
+        _install_diag_log_capture()
         _strip_botocore_host_prefix()
 
         scene_path = os.environ.get("DEADLINE_CLOUD_SCENE_PATH", "")
