@@ -5,7 +5,17 @@ from unittest import mock
 
 import pytest
 
-from deadline.cinema4d_submitter.scene import Animation, FrameRange, RendererNames, Scene
+from deadline.cinema4d_submitter.scene import (
+    Animation,
+    FrameRange,
+    RendererNames,
+    Scene,
+    get_renderer_warning,
+    VERIFIED_RENDERERS,
+    THIRD_PARTY_PLUGIN_RENDERERS,
+    UNSUPPORTED_RENDERERS,
+    VIEWPORT_RENDERERS,
+)
 
 
 def test_renderer_names():
@@ -35,6 +45,59 @@ def test_renderer():
     renderer = Scene.renderer(render_data=render_data)
     assert renderer is not None
     assert renderer == "standard"
+
+
+@mock.patch("c4d.RDATA_RENDERENGINE", 0)
+def test_renderer_viewport():
+    """Verify that Viewport Renderer returns its name without crashing."""
+    render_data = {0: 300001061}
+    renderer = Scene.renderer(render_data=render_data)
+    assert renderer == "viewport_renderer"
+
+
+@mock.patch("c4d.RDATA_RENDERENGINE", 0)
+def test_renderer_unknown_id_returns_string():
+    """Verify that an unknown renderer ID returns the ID as a string."""
+    render_data = {0: 9999999}
+    renderer = Scene.renderer(render_data=render_data)
+    assert renderer == "9999999"
+
+
+def test_get_renderer_warning_verified_renderer_returns_none():
+    """Verified renderers should not produce a warning."""
+    for renderer in VERIFIED_RENDERERS:
+        assert get_renderer_warning(renderer.value) is None
+
+
+def test_get_renderer_warning_third_party_renderer():
+    """Third-party renderers should produce a plugin installation warning."""
+    for renderer in THIRD_PARTY_PLUGIN_RENDERERS:
+        warning = get_renderer_warning(renderer.value)
+        assert warning is not None
+        assert "third-party" in warning.lower() or "plugin" in warning.lower()
+
+
+def test_get_renderer_warning_unsupported_renderer():
+    """Unsupported renderers should produce a not-supported warning."""
+    for renderer in UNSUPPORTED_RENDERERS:
+        warning = get_renderer_warning(renderer.value)
+        assert warning is not None
+        assert "not supported" in warning.lower()
+
+
+def test_get_renderer_warning_viewport_renderer():
+    """Viewport Renderer should produce a quality warning."""
+    for renderer in VIEWPORT_RENDERERS:
+        warning = get_renderer_warning(renderer.value)
+        assert warning is not None
+        assert "viewport" in warning.lower()
+
+
+def test_get_renderer_warning_unknown_renderer():
+    """Unknown renderers should produce an unverified warning."""
+    warning = get_renderer_warning(9999999)
+    assert warning is not None
+    assert "not been verified" in warning.lower()
 
 
 class TestAnimation:
