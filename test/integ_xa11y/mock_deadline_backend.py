@@ -52,6 +52,13 @@ _DIAG_T0 = time.monotonic()
 _inflight_lock = threading.Lock()
 _inflight = {"deadline": 0, "sts": 0}
 
+# Default artificial per-response delay (seconds). See _response_latency_s for
+# why this is non-zero: it restores real-network spacing so the submitter's
+# startup queue-environment reloads don't cancel-storm and race the Export
+# press. Overridable via the MOCK_DEADLINE_LATENCY_S env var (set it to "0" to
+# get the original instant behaviour, e.g. to reproduce the flake).
+_DEFAULT_RESPONSE_LATENCY_S = 0.25
+
 
 def _diag_log(tag: str, msg: str) -> None:
     elapsed = time.monotonic() - _DIAG_T0
@@ -64,19 +71,31 @@ def _diag_log(tag: str, msg: str) -> None:
 
 
 def _response_latency_s() -> float:
-    """Artificial per-response delay (seconds), from MOCK_DEADLINE_LATENCY_S.
+    """Artificial per-response delay (seconds).
 
     Real Deadline/STS calls take tens-to-hundreds of ms over the network, which
     spaces out the submitter's startup reload retriggers so its queue-parameter
     loads complete one at a time. The in-process mock answers in ~0.1ms, which
-    compresses several reload cycles into one tiny window and provokes the
-    deadline-cloud queue-parameter reload race. Adding latency here restores the
-    real-world spacing. 0 (default) keeps the original instant behaviour.
+    compresses several reload cycles into one tiny window and provokes a
+    deadline-cloud queue-parameter reload race (rebuild_ui deleting a parameter
+    control out from under the Export press -> "Internal C++ object (QLineEdit)
+    already deleted" or an empty queue-params section -> no/incorrect bundle).
+
+    Defaulting to a non-zero delay (_DEFAULT_RESPONSE_LATENCY_S) restores the
+    real-world spacing and makes the test robust regardless of how it's launched
+    (`hatch run integ-xa11y:test` or a direct pytest call). This is an interim
+    mitigation until the deadline-cloud fix ships; remove it once that lands.
+
+    Override via MOCK_DEADLINE_LATENCY_S (e.g. set "0" to restore the original
+    instant behaviour and reproduce the flake).
     """
+    raw = os.environ.get("MOCK_DEADLINE_LATENCY_S")
+    if raw is None or raw == "":
+        return _DEFAULT_RESPONSE_LATENCY_S
     try:
-        return float(os.environ.get("MOCK_DEADLINE_LATENCY_S", "0") or "0")
+        return float(raw)
     except ValueError:
-        return 0.0
+        return _DEFAULT_RESPONSE_LATENCY_S
 
 
 _CONDA_QUEUE_ENV_ID = "queueenv-00000000000000000000000000000001"
