@@ -162,7 +162,17 @@ class MockDeadlineBackend:
     ) -> dict:
         if farmId != self.farm_id or queueId != self.queue_id:
             raise _resource_not_found("queue", queueId, "ListQueueEnvironments")
-        return {"environments": [dict(data.CONDA_QUEUE_ENV_SUMMARY)]}
+        # Deliberately return NO queue environments. With zero envs, the
+        # submitter's queue-parameter load has nothing to build, so
+        # OpenJDParametersWidget.rebuild_ui never recreates QLineEdits, and the
+        # reload race (a control deleted out from under an Export press) cannot
+        # occur -- no need for the queue-params-stable timing workaround.
+        #
+        # Trade-off: the exported bundle then carries no CondaPackages /
+        # CondaChannels (those come only from the Conda queue env), so the
+        # expected job bundles omit them too. GetQueueEnvironment is therefore
+        # never called.
+        return {"environments": []}
 
     @route(
         "GET",

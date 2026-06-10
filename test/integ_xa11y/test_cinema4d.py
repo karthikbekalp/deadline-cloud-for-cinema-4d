@@ -42,7 +42,6 @@ _AUTO_OPEN_PLUGIN_FILE = _AUTO_OPEN_PLUGIN_DIR / "AutoOpenSubmitter.pyp"
 #                    submit_job_to_deadline_dialog.py:250
 _DIALOG_NAME_PREFIX = "Deadline Cloud Cinema4D Submitter"
 _EXPORT_BUTTON_NAME = "Export bundle"
-_SUCCESS_DIALOG_PREFIX = "Cinema4D job submission"
 # Both the UIA App for the dialog and the dialog window itself surface
 # the same name (the QApplication display name + version), so we reuse
 # the same prefix for both.
@@ -51,26 +50,6 @@ _DIALOG_APP_PREFIX = _DIALOG_NAME_PREFIX
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
 _BUNDLE_EXPORT_TIMEOUT_S = 60.0
-_BUNDLE_ON_DISK_TIMEOUT_S = 30.0
-
-# The Conda queue-environment parameters render under a group labelled
-# "Queue Environment: Conda" containing static_text labels "Conda Packages" and
-# "Conda Channels" (see the live tree dumps in commit history). This assumes the
-# real queue this test submits to has a Conda queue environment; if yours does
-# not, the gate below times out (non-fatal) and the bundle won't carry Conda
-# params. We gate the Export press on these being present and stable.
-_CONDA_PARAMS_SELECTOR = (
-    "group[name^='Queue Environment: Conda'], "
-    "static_text[name^='Conda Packages'], "
-    "static_text[name^='Conda Channels']"
-)
-# How long the Conda params must remain present without the loading caption
-# reappearing before we trust the dialog has settled and press Export. This is
-# the interim workaround for the deadline-cloud queue-parameter reload race
-# (rebuild_ui deleting a control out from under an Export press). See
-# _wait_for_queue_params_stable. Remove once the deadline-cloud fix is released.
-_QUEUE_PARAMS_SETTLE_S = 2.0
-_QUEUE_PARAMS_STABLE_TIMEOUT_S = 60.0
 
 
 def _prepend(new: str, existing: str, sep: str) -> str:
@@ -307,14 +286,14 @@ def _wait_for_submitter_dialog(dialog_app):
 
 
 def _wait_for_queue_environment_loading(dialog_app) -> None:
-    """Wait for queue environment loading to finish. Non-fatal if it times
-    out — Export bundle may still be clickable."""
+    """Wait for the queue-environment loading caption to clear. Non-fatal if it
+    times out — Export bundle may still be clickable.
+
+    The mock returns no queue environments, so the caption ("Loading Queue
+    Environments...") should appear briefly and clear almost immediately; we
+    still wait for it to confirm the dialog has settled before pressing Export.
+    """
     log("waiting for queue environment loading to finish")
-    # DIAGNOSTIC: the dialog shows several different loading captions depending on
-    # which retrigger is active ("Loading Queue Environments...", "Reloading
-    # Queue Environments...", "Error loading queue environments: ..."). The
-    # original selector only matches the first. Match all three so the log shows
-    # which state we actually waited on, and whether it ever cleared.
     loading = dialog_app.locator(
         "static_text[name^='Loading Queue Environments'], "
         "static_text[name^='Reloading Queue Environments'], "
@@ -325,129 +304,6 @@ def _wait_for_queue_environment_loading(dialog_app) -> None:
         log("queue environment loading finished (loading caption hidden)")
     except Exception as e:
         log(f"loading-text wait failed (non-fatal): {e!r}")
-    # DIAGNOSTIC: report the queue-parameter loading caption state right before we
-    # press Export. If a caption still exists here, the Conda queue parameters
-    # have NOT been applied yet and the exported bundle will be missing
-    # CondaPackages / CondaChannels -> golden-bundle assert fails.
-    try:
-        if loading.exists():
-            captions = [e.name for e in loading.elements()]
-            log(
-                "DIAG: queue-env loading caption STILL PRESENT before Export "
-                f"{captions!r} -> Conda params likely not yet applied (flake imminent)"
-            )
-        else:
-            log("DIAG: queue-env loading caption gone before Export (good)")
-    except Exception as e:
-        log(f"DIAG: could not probe loading caption: {e!r}")
-
-
-def _wait_for_queue_params_stable(dialog, dialog_app) -> None:
-    """Interim workaround for the deadline-cloud queue-parameter reload race.
-
-    The submitter reloads queue environments several times in the first second
-    or two after the dialog opens (each auth-status callback retriggers a load),
-    and each reload tears down and rebuilds the parameter widgets. If we press
-    Export while a rebuild is in flight, get_parameters() reads a control whose
-    QLineEdit was just deleted and the export crashes ("Internal C++ object
-    (QLineEdit) already deleted") -> no bundle is written.
-
-    A real user never hits this because they click Export seconds after the
-    dialog settles; only the auto-driver clicks fast enough to land mid-reload.
-    So we reproduce a human's patience: wait until the Conda parameter controls
-    are present AND have stayed present, with no loading caption, for a short
-    settle window -- i.e. no reload is in flight -- before pressing Export.
-
-    Non-fatal: if the params never stabilise we log and let the press proceed,
-    so this can only make the test more robust, never newly fail it.
-
-    Remove once the deadline-cloud queue-parameter reload-race fix is released.
-    """
-    import time as _t
-
-    conda = dialog.descendant(_CONDA_PARAMS_SELECTOR)
-    loading = dialog_app.locator(
-        "static_text[name^='Loading Queue Environments'], "
-        "static_text[name^='Reloading Queue Environments']"
-    )
-
-    log(
-        f"waiting for queue params to stabilise "
-        f"(present + no reload for {_QUEUE_PARAMS_SETTLE_S:.1f}s)"
-    )
-    deadline_t = _t.monotonic() + _QUEUE_PARAMS_STABLE_TIMEOUT_S
-    stable_since = None
-    while _t.monotonic() < deadline_t:
-        try:
-            params_present = conda.exists()
-            reloading = loading.exists()
-        except Exception as e:
-            log(f"stability probe raised (retrying): {e!r}")
-            params_present, reloading = False, True
-
-        if params_present and not reloading:
-            if stable_since is None:
-                stable_since = _t.monotonic()
-            elif _t.monotonic() - stable_since >= _QUEUE_PARAMS_SETTLE_S:
-                log("queue params stable; safe to press Export")
-                return
-        else:
-            # A reload is in flight (or params not yet built) -> reset the timer.
-            stable_since = None
-        _t.sleep(0.2)
-
-    log(
-        "WARNING: queue params did not reach a stable state within "
-        f"{_QUEUE_PARAMS_STABLE_TIMEOUT_S:.0f}s; pressing Export anyway (may flake)"
-    )
-
-
-def _diag_probe_conda_params(dialog, dialog_app) -> None:
-    """DIAGNOSTIC: confirm whether the Conda queue-environment parameters are
-    actually rendered in the dialog before we press Export.
-
-    The user observed the dialog showing Farm/Queue resolved but NO
-    "Queue Environment: Conda" parameter section -- i.e. queue environments did
-    not load into the UI even though the loading caption cleared. The loading
-    caption disappearing only means OpenJDParametersWidget.rebuild_ui ran; it
-    does NOT prove the Conda controls were built. This probe looks for the Conda
-    group label and the CondaPackages / CondaChannels controls directly, and
-    dumps the dialog tree so we can see exactly what rendered."""
-    try:
-        # The Conda queue env renders its controls under a group labelled
-        # "Queue Environment: Conda"; the param labels are "Conda Packages" /
-        # "Conda Channels".
-        conda_markers = dialog.descendant(
-            "*[name^='Queue Environment: Conda'], "
-            "*[name^='Conda Packages'], "
-            "*[name^='Conda Channels'], "
-            "*[name^='CondaPackages'], "
-            "*[name^='CondaChannels']"
-        )
-        n = conda_markers.count()
-        if n > 0:
-            names = [e.name for e in conda_markers.elements()]
-            log(f"DIAG: Conda queue-env params PRESENT in dialog ({n}): {names!r}")
-        else:
-            log(
-                "DIAG: Conda queue-env params ABSENT from dialog -- queue "
-                "environments did not render. Export will produce a bundle "
-                "missing CondaPackages/CondaChannels (matches user's screenshot)."
-            )
-    except Exception as e:
-        log(f"DIAG: could not probe Conda params: {e!r}")
-    # Always dump the dialog subtree so we can see the actual rendered parameter
-    # controls at press time. Fall back to the whole app tree if the dialog
-    # locator can't resolve for some reason.
-    try:
-        log("DIAG: dialog tree at Export press (depth=10):")
-        print(dialog.dump(max_depth=10))
-    except Exception as e:
-        log(f"DIAG: dialog.dump() failed ({e!r}); dumping app tree instead:")
-        try:
-            print(dialog_app.dump(max_depth=10))
-        except Exception as e2:
-            log(f"DIAG: dialog_app.dump() also failed: {e2!r}")
 
 
 def _press_export_bundle(dialog, dialog_app) -> None:
@@ -457,7 +313,6 @@ def _press_export_bundle(dialog, dialog_app) -> None:
     export_btn = dialog.descendant(f"button[name='{_EXPORT_BUTTON_NAME}']")
     export_btn.wait_visible(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
     export_btn.wait_enabled(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
-    _diag_probe_conda_params(dialog, dialog_app)
     log("pressing Export bundle")
     try:
         export_btn.press()
@@ -470,55 +325,135 @@ def _press_export_bundle(dialog, dialog_app) -> None:
         raise
 
 
-def _dismiss_success_popup(dialog_app) -> None:
-    """Dismiss the success popup if we can find it, but don't fail if we
-    can't — the bundle is already on disk by the time we get here.
+def _dismiss_success_popup() -> None:
+    """Dismiss the "Saved the submission as a job bundle" popup promptly.
 
-    Matching the QMessageBox success popup's AX name is unreliable across
-    platforms (on macOS it surfaces differently than on Windows UIA), so the
-    bundle-on-disk check is the real source of truth for export success.
+    The popup is deadline-cloud's success QMessageBox. Two things make it
+    awkward to match (both confirmed by dumping the live AX tree):
+
+    * It is hosted by the **Cinema 4D** app, NOT the separate submitter-dialog
+      app, so searching ``dialog_app`` never finds it.
+    * Its title ("Cinema4D job submission") is not exposed as the dialog's AX
+      name on macOS -- the role is ``dialog`` with an empty name. The reliable
+      anchor is the message body static_text, which starts with "Saved the
+      submission as a job bundle".
+
+    So we poll all apps for a dialog/window/sheet containing that body text and
+    press its OK button. Best-effort and non-fatal: the bundle is already on
+    disk and asserted separately. Polling (rather than one 5s blocking
+    wait_visible that previously always timed out and left the popup up) makes
+    this dismiss within a fraction of a second once the popup appears.
     """
-    log(f"looking for success popup: {_SUCCESS_DIALOG_PREFIX!r}")
+    import time as _t
+
+    log("dismissing success popup ('Saved the submission as a job bundle')")
+    deadline_t = _t.monotonic() + 5.0
+    while _t.monotonic() < deadline_t:
+        try:
+            for app in xa11y.App.list():
+                ok = app.locator(
+                    "dialog button[name='OK'], "
+                    "window button[name='OK'], "
+                    "sheet button[name='OK']"
+                )
+                # Only treat it as our popup if the success body text is present
+                # in the same app, so we don't press an unrelated OK button.
+                body = app.locator("static_text[name^='Saved the submission as a job bundle']")
+                if body.exists() and ok.exists():
+                    ok.press()
+                    log("success popup dismissed (OK)")
+                    return
+        except Exception as e:
+            log(f"success-popup scan raised (retrying): {e!r}")
+        _t.sleep(0.25)
+    log("success popup not found within 5s (non-fatal, bundle already exported)")
+
+
+def _close_explorer_window(history_dir: Path) -> None:
+    """Windows only: close the File Explorer window the submitter pops open.
+
+    After a successful export, deadline-cloud's submitter calls
+    ``os.startfile(self.job_history_bundle_dir)`` on win32
+    (submit_job_to_deadline_dialog.py), which opens the bundle folder in
+    Explorer. That window lingers after the test and piles up across runs on a
+    Windows runner, so we close it via xa11y.
+
+    Best-effort and never fatal: the bundle is already on disk and asserted
+    separately, so failing to find/close the window must not fail the test. We
+    match an Explorer window by:
+      * app name "explorer" / "File Explorer", and
+      * a window whose title or address bar mentions the bundle folder name
+        (the job-history bundle dir's leaf, e.g. the dated bundle name).
+    then invoke the window's close action (UIA exposes a window 'close'/'invoke'
+    action; fall back to a Ctrl+W keypress on the focused window).
+
+    No-op on non-Windows (the submitter doesn't open Explorer there).
+    """
+    if sys.platform != "win32":
+        return
+
+    import time as _t
+
+    bundle_leaf = history_dir.name  # the job_history dir; Explorer opens a child
+    log("looking for the Explorer window opened by the submitter")
+    # Give Explorer a moment to actually appear after os.startfile.
+    deadline_t = _t.monotonic() + 10.0
+    while _t.monotonic() < deadline_t:
+        try:
+            for app in xa11y.App.list():
+                app_name = (app.name or "").lower()
+                if "explorer" not in app_name and "file explorer" not in app_name:
+                    continue
+                for window in app.children():
+                    title = getattr(window, "name", "") or ""
+                    # Explorer titles the window with the folder's leaf name; the
+                    # bundle lives under history_dir, so match either.
+                    if bundle_leaf and bundle_leaf not in title and "DeadlineCloud" not in title:
+                        # Not obviously our window; skip to avoid closing an
+                        # unrelated Explorer the developer had open.
+                        continue
+                    if _try_close_window(window, title):
+                        return
+        except Exception as e:
+            log(f"Explorer-window scan raised (non-fatal): {e!r}")
+        _t.sleep(0.5)
+    log("no matching Explorer window found to close (non-fatal)")
+
+
+def _try_close_window(window, title: str) -> bool:
+    """Attempt to close one accessibility window. Returns True on success.
+
+    Tries, in order: a window-level close/invoke action, then focusing the
+    window and sending Ctrl+W. All wrapped so a failure is logged, not raised."""
+    for action in ("close", "invoke"):
+        try:
+            if action in (window.actions or []):
+                window.perform_action(action)
+                log(f"closed Explorer window via {action!r} action: {title!r}")
+                return True
+        except Exception as e:
+            log(f"window {action!r} action failed (trying next): {e!r}")
+    # Fallback: focus the window and send Ctrl+W (Explorer's close-window/tab).
+    # Keyboard input is on InputSim, not Element: Element.press() takes no args.
     try:
-        success = dialog_app.locator(
-            f"dialog[name^='{_SUCCESS_DIALOG_PREFIX}'], "
-            f"window[name^='{_SUCCESS_DIALOG_PREFIX}'], "
-            f"sheet[name^='{_SUCCESS_DIALOG_PREFIX}']"
-        )
-        success.wait_visible(timeout=5.0)
-        log("dismissing success popup (OK)")
-        success.descendant("button[name='OK']").press()
-    except Exception:
-        log("success popup not found (non-fatal, bundle already exported)")
+        window.focus()
+        xa11y.input_sim().chord("w", held=["ctrl"])
+        log(f"closed Explorer window via Ctrl+W: {title!r}")
+        return True
+    except Exception as e:
+        log(f"Ctrl+W close failed: {e!r}")
+    return False
 
 
 def _diag_dump_exported_params(staged_bundle: Path) -> None:
-    """DIAGNOSTIC: dump the exported parameter_values.yaml and flag whether the
-    Conda queue-environment parameters made it into the bundle.
-
-    The flake manifests as a generated parameter_values.yaml missing
-    CondaPackages / CondaChannels. Those come from the async queue-environment
-    load (ListQueueEnvironments -> GetQueueEnvironment). If Export was pressed
-    before that load finished, the OpenJDParametersWidget still has zero
-    controls, so get_parameters() returns nothing for the Conda params and the
-    golden-bundle equality assert fails. Logging the file here makes that
-    visible directly instead of only via the eventual assertion diff."""
+    """DIAGNOSTIC: dump the exported parameter_values.yaml so a failing
+    golden-bundle comparison can be diagnosed from the test log directly,
+    rather than only via the eventual assertion diff."""
     params_file = staged_bundle / "parameter_values.yaml"
     if not params_file.is_file():
         log(f"DIAG: no parameter_values.yaml in staged bundle {staged_bundle}")
         return
     text = params_file.read_text(encoding="utf-8", errors="replace")
-    has_conda_pkgs = "CondaPackages" in text
-    has_conda_channels = "CondaChannels" in text
-    log(
-        "DIAG: exported parameter_values.yaml "
-        f"CondaPackages={has_conda_pkgs} CondaChannels={has_conda_channels}"
-    )
-    if not (has_conda_pkgs and has_conda_channels):
-        log(
-            "DIAG: ROOT-CAUSE SIGNAL -- Conda queue params MISSING from export. "
-            "Export fired before queue-environment load applied them."
-        )
     log(f"--- exported parameter_values.yaml ({params_file}) ---")
     print(text)
     log("--- end exported parameter_values.yaml ---")
@@ -538,15 +473,14 @@ def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path) -> Path:
     """Drive the running submitter dialog via xa11y and return the exported
     bundle directory once it lands on disk.
 
-    Waits for the dialog, lets queue environments finish loading, waits for the
-    queue parameters to stabilise (interim workaround for the deadline-cloud
-    reload race), presses Export bundle, then waits for the bundle to appear
-    under `history_dir` before dismissing the success popup.
+    Waits for the dialog, lets queue-environment loading settle (the mock
+    returns no queue environments, so there are no Conda parameter widgets to
+    rebuild and thus no reload race), presses Export bundle, then waits for the
+    bundle to appear under `history_dir` before dismissing the success popup.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
-    _wait_for_queue_params_stable(dialog, dialog_app)
     _press_export_bundle(dialog, dialog_app)
 
     # Wait for the bundle to land on disk. This is the source of truth for
@@ -554,7 +488,10 @@ def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path) -> Path:
     # popup's AX name across platforms.
     staged_bundle = wait_for_bundle(history_dir, timeout_s=_BUNDLE_EXPORT_TIMEOUT_S)
 
-    _dismiss_success_popup(dialog_app)
+    _dismiss_success_popup()
+    # On Windows the submitter opens the bundle folder in Explorer; close it so
+    # the windows don't accumulate across runs. No-op elsewhere.
+    _close_explorer_window(history_dir)
     return staged_bundle
 
 
@@ -650,7 +587,10 @@ def test_integ(
     assert (
         backend.unmatched_requests == []
     ), f"submitter hit routes the mock doesn't implement: {backend.unmatched_requests}"
-    for op in ("ListFarms", "GetFarm", "GetQueue", "ListQueueEnvironments", "GetQueueEnvironment"):
+    # GetQueueEnvironment is intentionally NOT expected: the mock returns an
+    # empty queue-environment list (see list_queue_environments), so the
+    # submitter never fetches an env template.
+    for op in ("ListFarms", "GetFarm", "GetQueue", "ListQueueEnvironments"):
         assert (
             backend.call_counts.get(op, 0) >= 1
         ), f"expected the submitter to call {op}; saw {dict(backend.call_counts)}"
