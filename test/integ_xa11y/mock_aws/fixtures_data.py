@@ -2,22 +2,19 @@
 
 """Ground-truth response data for the mock Deadline backend.
 
-These values were captured by running the real xa11y Export-bundle test against
-a live Deadline Cloud farm with the API logger in ``AutoOpenSubmitter.pyp``
-enabled (``DEADLINE_CLOUD_API_TRACE``), then **sanitized**: real account ids,
-role ARNs, S3 bucket name, and operator principal were replaced with obviously
--fake placeholders. Only response *shapes* and the Conda queue-environment
-*template* need to be faithful -- the template is what produces the
-``CondaPackages`` / ``CondaChannels`` parameters the golden bundle asserts on.
+These values were originally captured from a live Deadline Cloud farm, then
+**sanitized**: real account ids, role ARNs, S3 bucket name, and operator
+principal were replaced with obviously-fake placeholders. Only the response
+*shapes* need to be faithful.
 
-Observed call set for the Export-bundle flow (telemetry opted out, so no STS):
-``ListFarms``, ``GetFarm``, ``GetQueue``, ``ListQueueEnvironments``,
-``GetQueueEnvironment`` -- five Deadline operations, nothing else.
+Call set for the Export-bundle flow (telemetry opted out, so no STS):
+``ListFarms``, ``GetFarm``, ``GetQueue``, ``ListQueueEnvironments``. The mock
+returns an empty queue-environment list (see ``deadline.py``), so the submitter
+never calls ``GetQueueEnvironment`` and the exported bundle carries no
+``CondaPackages`` / ``CondaChannels``.
 
-Of the three queue environments on the real queue, only ``Conda`` defines UI
-parameters; ``C4DExists`` and ``PrintCurrentEnv`` are parameter-less onEnter
-scripts that contribute nothing to the exported bundle, so the mock models only
-``Conda``.
+The Conda queue-environment template below is retained for reference only -- it
+is not served while the queue-environment list is empty.
 """
 
 from __future__ import annotations

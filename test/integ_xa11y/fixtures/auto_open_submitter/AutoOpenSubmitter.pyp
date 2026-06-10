@@ -181,119 +181,6 @@ def _install_diag_log_capture():
         _diag(f"excepthook install failed: {e!r}")
 
 
-def _install_api_call_logger():
-    """DIAGNOSTIC / DISCOVERY: log every AWS API call the submitter makes.
-
-    Every boto3 client method (deadline, s3, sts, paginated and retried calls
-    alike) funnels through ``botocore.client.BaseClient._make_api_call``, so
-    wrapping that single method captures the complete, real set of AWS
-    operations the Export-bundle flow invokes against the live farm -- including
-    anything indirect or paginated that reading the source would miss.
-
-    Two log destinations, both opt-in via env var:
-
-    * ``DEADLINE_CLOUD_API_LOG`` (falls back to ``DEADLINE_CLOUD_DIAG_LOG``):
-      one human-readable ``API-CALL <service> <operation> <ms>ms`` line per
-      call, with a ``FAILED`` variant so calls that errored are still counted.
-    * ``DEADLINE_CLOUD_API_TRACE``: one JSON object per line capturing the
-      service, operation, request params, response body (minus the noisy
-      ``ResponseMetadata``), elapsed milliseconds, and ok/error -- so a later
-      phase can seed the offline mock and the golden bundle from REAL response
-      data rather than hand-written guesses.
-
-    Capturing real bodies and timings is what lets the offline mock be grounded
-    on observed reality: we replay what the live service actually returned.
-    """
-    try:
-        import json
-        import time
-        from datetime import datetime
-        from botocore.client import BaseClient
-
-        api_log_path = os.environ.get("DEADLINE_CLOUD_API_LOG") or os.environ.get(
-            "DEADLINE_CLOUD_DIAG_LOG"
-        )
-        api_trace_path = os.environ.get("DEADLINE_CLOUD_API_TRACE")
-
-        def _api_log(msg):
-            if not api_log_path:
-                return
-            try:
-                with open(api_log_path, "a", encoding="utf-8") as f:
-                    f.write(f"{msg}\n")
-            except Exception:
-                pass
-
-        def _json_default(obj):
-            # Deadline/STS responses carry datetimes (createdAt, expiration);
-            # serialize them as ISO-8601 so the trace is valid JSON.
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            return repr(obj)
-
-        def _api_trace(record):
-            if not api_trace_path:
-                return
-            try:
-                with open(api_trace_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record, default=_json_default) + "\n")
-            except Exception:
-                pass
-
-        if getattr(BaseClient, "_deadline_api_logger_installed", False):
-            return
-        original_make_api_call = BaseClient._make_api_call
-
-        def _logging_make_api_call(self, operation_name, api_params):
-            service = getattr(getattr(self, "meta", None), "service_model", None)
-            service_id = service.endpoint_prefix if service is not None else "unknown"
-            start = time.monotonic()
-            try:
-                result = original_make_api_call(self, operation_name, api_params)
-                elapsed_ms = (time.monotonic() - start) * 1000.0
-                _api_log(f"API-CALL {service_id} {operation_name} {elapsed_ms:.0f}ms")
-                # Drop ResponseMetadata (request ids, headers) -- noise for
-                # replay, and varies per call.
-                body = (
-                    {k: v for k, v in result.items() if k != "ResponseMetadata"}
-                    if isinstance(result, dict)
-                    else result
-                )
-                _api_trace(
-                    {
-                        "service": service_id,
-                        "operation": operation_name,
-                        "params": api_params,
-                        "elapsed_ms": round(elapsed_ms, 1),
-                        "ok": True,
-                        "response": body,
-                    }
-                )
-                return result
-            except Exception as e:
-                elapsed_ms = (time.monotonic() - start) * 1000.0
-                _api_log(
-                    f"API-CALL {service_id} {operation_name} {elapsed_ms:.0f}ms FAILED {e!r}"
-                )
-                _api_trace(
-                    {
-                        "service": service_id,
-                        "operation": operation_name,
-                        "params": api_params,
-                        "elapsed_ms": round(elapsed_ms, 1),
-                        "ok": False,
-                        "error": repr(e),
-                    }
-                )
-                raise
-
-        BaseClient._make_api_call = _logging_make_api_call
-        BaseClient._deadline_api_logger_installed = True
-        _diag(f"API call logger installed (log -> {api_log_path}, trace -> {api_trace_path})")
-    except Exception as e:
-        _diag(f"API call logger install failed: {e!r}")
-
-
 def _load_active_scene(scene_path):
     """Load ``scene_path`` and set it as the active document so the submitter sees
     a real document with a valid path."""
@@ -334,7 +221,6 @@ def PluginMessage(id, data):
     if id == c4d.C4DPL_PROGRAM_STARTED:
         _diag("C4DPL_PROGRAM_STARTED: auto-opening submitter for integ test")
         _install_diag_log_capture()
-        _install_api_call_logger()
         # Must run before the submitter opens so its first API call is already
         # redirected to the loopback mock (no-op unless DEADLINE_CLOUD_MOCK_MODE=1).
         _install_management_host_redirect()

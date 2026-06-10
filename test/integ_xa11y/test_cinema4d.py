@@ -306,6 +306,33 @@ def _wait_for_queue_environment_loading(dialog_app) -> None:
         log(f"loading-text wait failed (non-fatal): {e!r}")
 
 
+def _save_dialog_screenshot(dialog, dialog_app, dest: Path) -> None:
+    """Save a PNG of the submitter dialog into `dest` as a record of the run.
+
+    Captured just before Export is pressed, so it shows the fully-loaded dialog
+    state that produced the bundle. Best-effort and never fatal — a screenshot
+    failure must not fail the test. Tries to capture just the dialog element;
+    falls back to the dialog app's window, then the full screen.
+
+    Lives in `generated_bundle/`, which is removed on a successful run and kept
+    on failure — so the screenshot survives exactly when you'd want to inspect
+    it (a failed run).
+    """
+    out = dest / "submitter_dialog.png"
+    for label, kwargs in (
+        ("dialog element", {"element": dialog.element()}),
+        ("dialog app window", {"element": dialog_app.as_element()}),
+        ("full screen", {}),
+    ):
+        try:
+            xa11y.screenshot(**kwargs).save_png(str(out))
+            log(f"saved submitter screenshot ({label}) -> {out}")
+            return
+        except Exception as e:
+            log(f"screenshot via {label} failed (trying next): {e!r}")
+    log("could not capture submitter screenshot (non-fatal)")
+
+
 def _press_export_bundle(dialog, dialog_app) -> None:
     """Wait for the Export bundle button to be visible and enabled, then
     press it."""
@@ -369,23 +396,8 @@ def _dismiss_success_popup() -> None:
     log("success popup not found within 5s (non-fatal, bundle already exported)")
 
 
-def _diag_dump_exported_params(staged_bundle: Path) -> None:
-    """DIAGNOSTIC: dump the exported parameter_values.yaml so a failing
-    golden-bundle comparison can be diagnosed from the test log directly,
-    rather than only via the eventual assertion diff."""
-    params_file = staged_bundle / "parameter_values.yaml"
-    if not params_file.is_file():
-        log(f"DIAG: no parameter_values.yaml in staged bundle {staged_bundle}")
-        return
-    text = params_file.read_text(encoding="utf-8", errors="replace")
-    log(f"--- exported parameter_values.yaml ({params_file}) ---")
-    print(text)
-    log("--- end exported parameter_values.yaml ---")
-
-
 def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
     """Copy the exported bundle files flat into `dest`."""
-    _diag_dump_exported_params(staged_bundle)
     log(f"copying bundle files {staged_bundle} -> {dest}")
     for src in staged_bundle.iterdir():
         if src.is_file():
@@ -393,18 +405,21 @@ def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
             log(f"  copied {src.name}")
 
 
-def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path) -> Path:
+def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path, screenshot_dest: Path) -> Path:
     """Drive the running submitter dialog via xa11y and return the exported
     bundle directory once it lands on disk.
 
     Waits for the dialog, lets queue-environment loading settle (the mock
     returns no queue environments, so there are no Conda parameter widgets to
-    rebuild and thus no reload race), presses Export bundle, then waits for the
-    bundle to appear under `history_dir` before dismissing the success popup.
+    rebuild and thus no reload race), saves a screenshot of the dialog into
+    `screenshot_dest`, presses Export bundle, then waits for the bundle to
+    appear under `history_dir` before dismissing the success popup.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
+    # Record the fully-loaded dialog state just before Export, for inspection.
+    _save_dialog_screenshot(dialog, dialog_app, screenshot_dest)
     _press_export_bundle(dialog, dialog_app)
 
     # Wait for the bundle to land on disk. This is the source of truth for
@@ -448,7 +463,7 @@ def _export_job_bundle_via_submitter(
         env = _build_launch_env(scene_path, plugin_diag_log, deadline_farm["env_overlay"])
         proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
         try:
-            staged_bundle = _drive_submitter_ui(proc, history_dir)
+            staged_bundle = _drive_submitter_ui(proc, history_dir, job_bundle_generated)
             _copy_bundle_files(staged_bundle, job_bundle_generated)
         finally:
             kill_proc(proc)
