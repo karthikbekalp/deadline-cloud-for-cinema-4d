@@ -11,8 +11,8 @@ import sys
 
 from pathlib import Path
 
-from deadline.client.config import get_setting
-
+from .mock_aws.server_process import MockServerProcess
+from .mock_aws.wiring import build_mock_env, write_deadline_config
 from .utils import resolve_c4d_exe
 
 # Default install paths per version and platform.
@@ -102,9 +102,7 @@ def _set_c4d_python_path():
     all_paths = [project_src] + site_pkgs + win32_paths
     existing = os.environ.get("C4DPYTHONPATH311", "")
     new_paths = os.pathsep.join(p for p in all_paths if p and p not in existing)
-    os.environ["C4DPYTHONPATH311"] = (
-        f"{new_paths}{os.pathsep}{existing}" if existing else new_paths
-    )
+    os.environ["C4DPYTHONPATH311"] = f"{new_paths}{os.pathsep}{existing}" if existing else new_paths
     print(f"C4DPYTHONPATH311={os.environ.get('C4DPYTHONPATH311')}")
 
     # pywin32 DLLs (pywintypes311.dll, pythoncom311.dll) live in site-packages/pywin32_system32/
@@ -122,27 +120,60 @@ def test_scenes_folder_location() -> Path:
 
 
 @pytest.fixture
-def deadline_farm() -> dict:
-    """Resolve the real Deadline Cloud farm + queue this run submits to.
+def deadline_farm(tmp_path):
+    """Start the mock Deadline Cloud backend and wire the C4D subprocess to it.
 
-    The submitter dialog talks to the live Deadline Cloud service (and STS for
-    its auth probe) using whatever credentials and default profile the machine
-    is already logged into — set up via the Deadline Cloud monitor or
-    `deadline config`. We don't write a temp config or override any AWS
-    endpoint/credential env vars; the Cinema 4D child inherits the ambient
-    environment and reads the same default config this fixture validates.
+    The submitter no longer talks to real AWS. This fixture:
 
-    Fails fast with an actionable message if no farm/queue is selected, so the
-    test reports "log in and pick a farm" rather than a confusing dialog error.
+    1. starts the mock backend in a SEPARATE PROCESS (not a thread): the test
+       blocks in xa11y's native ``wait_hidden``, which holds the GIL and would
+       starve an in-process server thread, so the server needs its own GIL to
+       keep serving the C4D subprocess. Its observability (call_counts,
+       request_log, unmatched_requests) is read back over an admin endpoint via
+       a RemoteBackend proxy,
+    2. writes a temp deadline config naming the mock's farm/queue,
+    3. builds the env overlay (endpoint override + dummy creds + telemetry opt-out
+       + isolated HOME + config path + mock-mode flag) that the launch env applies
+       to the subprocess.
+
+    The matching ``management.`` getaddrinfo redirect is installed inside the
+    subprocess by the sidecar plugin when it sees ``DEADLINE_CLOUD_MOCK_MODE=1``.
+
+    Yields a dict consumed by the test:
+        backend, env_overlay, farm_id, queue_id, job_history_dir
     """
-    farm_id = get_setting("defaults.farm_id")
-    queue_id = get_setting("defaults.queue_id")
-    if not farm_id or not queue_id:
-        raise EnvironmentError(
-            "No default Deadline Cloud farm/queue is configured "
-            f"(farm_id={farm_id!r}, queue_id={queue_id!r}). Log in with the "
-            "Deadline Cloud monitor (or run `deadline config`) and select a "
-            "farm and queue before running this test."
-        )
-    print(f"Using real Deadline Cloud farm {farm_id} / queue {queue_id}")
-    return {"farm_id": farm_id, "queue_id": queue_id}
+    # Per-response latency (seconds), approximating the real farm's observed
+    # 200-600ms. Override via env var to experiment.
+    delay = float(os.environ.get("MOCK_DEADLINE_RESPONSE_DELAY_S", "0.3"))
+
+    server = MockServerProcess(response_delay_s=delay).start()
+    backend = server.backend
+    print(f"mock Deadline backend (separate process) listening at {server.base_url}")
+
+    config_path = tmp_path / "deadline.config"
+    home_dir = tmp_path / "home"
+    job_history_dir = tmp_path / "job_history"
+
+    write_deadline_config(
+        config_path,
+        farm_id=backend.farm_id,
+        queue_id=backend.queue_id,
+        job_history_dir=job_history_dir,
+    )
+    env_overlay = build_mock_env(
+        dict(os.environ),
+        deadline_endpoint_url=server.base_url,
+        config_path=config_path,
+        home_dir=home_dir,
+    )
+
+    try:
+        yield {
+            "backend": backend,
+            "env_overlay": env_overlay,
+            "farm_id": backend.farm_id,
+            "queue_id": backend.queue_id,
+            "job_history_dir": job_history_dir,
+        }
+    finally:
+        server.stop()

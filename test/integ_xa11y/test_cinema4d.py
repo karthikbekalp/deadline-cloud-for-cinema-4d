@@ -18,11 +18,9 @@ from .utils import (
     build_submitter_pythonpath,
     kill_proc,
     log,
-    override_job_history_dir,
     resolve_c4d_exe,
     wait_for_bundle,
 )
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REAL_PLUGIN_DIR = _REPO_ROOT / "deadline_cloud_extension"
@@ -158,17 +156,19 @@ def _build_cinema4d_scene(
 def _build_launch_env(
     scene_path: Path,
     plugin_diag_log: Path,
+    mock_env_overlay: dict,
 ) -> dict:
     """Build the environment for the Cinema 4D subprocess.
 
-    The child inherits this process's environment verbatim, so the submitter
-    dialog talks to the real Deadline Cloud service using the machine's
-    ambient AWS credentials and default deadline config (set up via the
-    Deadline Cloud monitor / `deadline config`). We deliberately do NOT
-    override any AWS endpoint or credential vars.
+    Starts from ``mock_env_overlay`` (built by the ``deadline_farm`` fixture):
+    that overlay already carries this process's environment plus the redirect to
+    the mock Deadline backend -- endpoint override, dummy credentials, telemetry
+    opt-out, isolated HOME, the temp deadline config path, and the mock-mode flag
+    that switches on the sidecar's ``management.`` getaddrinfo redirect. So the
+    submitter talks to the local mock, never real AWS.
     """
     return {
-        **os.environ,
+        **mock_env_overlay,
         # Point C4D at two plugin dirs: the real submitter plugin checked into
         # this repo, and the test-only sidecar that auto-opens the submitter.
         # C4D loads every .pyp on this path at startup; the sidecar dispatches
@@ -204,9 +204,7 @@ def _build_launch_env(
     }
 
 
-def _launch_cinema4d(
-    cinema4d_gui_exe: Path, scene_path: Path, env: dict
-) -> subprocess.Popen:
+def _launch_cinema4d(cinema4d_gui_exe: Path, scene_path: Path, env: dict) -> subprocess.Popen:
     """Launch Cinema 4D with the submitter + sidecar plugins.
 
     On macOS we don't pass the scene on argv (the sidecar loads it via
@@ -293,8 +291,7 @@ def _wait_for_submitter_dialog(dialog_app):
     """
     log(f"waiting for dialog: {_DIALOG_NAME_PREFIX!r}")
     dialog = dialog_app.locator(
-        f"dialog[name^='{_DIALOG_NAME_PREFIX}'], "
-        f"window[name^='{_DIALOG_NAME_PREFIX}']"
+        f"dialog[name^='{_DIALOG_NAME_PREFIX}'], " f"window[name^='{_DIALOG_NAME_PREFIX}']"
     )
     try:
         dialog.wait_visible(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
@@ -537,14 +534,14 @@ def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
             log(f"  copied {src.name}")
 
 
-def _drive_submitter_ui(proc: subprocess.Popen, bundle_staging: Path) -> Path:
-    """Drive the running submitter dialog via xa11y and return the staged
+def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path) -> Path:
+    """Drive the running submitter dialog via xa11y and return the exported
     bundle directory once it lands on disk.
 
     Waits for the dialog, lets queue environments finish loading, waits for the
     queue parameters to stabilise (interim workaround for the deadline-cloud
-    reload race), presses Export bundle, then waits for the bundle to appear on
-    disk before dismissing the success popup.
+    reload race), presses Export bundle, then waits for the bundle to appear
+    under `history_dir` before dismissing the success popup.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
@@ -555,7 +552,7 @@ def _drive_submitter_ui(proc: subprocess.Popen, bundle_staging: Path) -> Path:
     # Wait for the bundle to land on disk. This is the source of truth for
     # export success — more reliable than matching the QMessageBox success
     # popup's AX name across platforms.
-    staged_bundle = wait_for_bundle(bundle_staging, timeout_s=_BUNDLE_EXPORT_TIMEOUT_S)
+    staged_bundle = wait_for_bundle(history_dir, timeout_s=_BUNDLE_EXPORT_TIMEOUT_S)
 
     _dismiss_success_popup(dialog_app)
     return staged_bundle
@@ -565,33 +562,36 @@ def _export_job_bundle_via_submitter(
     cinema4d_location: Path,
     scene_path: Path,
     job_bundle_generated: Path,
+    deadline_farm: dict,
 ) -> None:
     """Launch Cinema 4D, drive the real submitter UI to export a job bundle,
     and copy the bundle files flat into `job_bundle_generated`.
 
     The submitter exports via create_job_history_bundle_dir, which always
-    writes under <history_dir>/<YYYY-mm>/<bundle-name>/. We point the history
-    at a staging dir, then copy the bundle files flat into generated_bundle/
-    so asserts use the same layout as the existing render integ tests.
+    writes under <history_dir>/<YYYY-mm>/<bundle-name>/. The history dir is set
+    in the temp deadline config the `deadline_farm` fixture wrote (read inside
+    the C4D subprocess), so the bundle lands under that dir; we then copy the
+    bundle files flat into generated_bundle/ so asserts use the same layout as
+    the existing render integ tests.
 
     Owns all cleanup: the C4D subprocess is always killed and its diagnostic
     log echoed before the staging dir is removed, even on failure.
     """
     cinema4d_gui_exe = resolve_c4d_exe(cinema4d_location, "Cinema 4D")
 
+    history_dir = deadline_farm["job_history_dir"]
     bundle_staging = Path(tempfile.mkdtemp(prefix="c4d-submitter-ui-"))
     plugin_diag_log = bundle_staging / "plugin-diag.log"
-    log(f"bundle staging dir: {bundle_staging}")
+    log(f"bundle staging dir: {bundle_staging}; job history dir: {history_dir}")
     try:
-        env = _build_launch_env(scene_path, plugin_diag_log)
-        with override_job_history_dir(bundle_staging):
-            proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
-            try:
-                staged_bundle = _drive_submitter_ui(proc, bundle_staging)
-                _copy_bundle_files(staged_bundle, job_bundle_generated)
-            finally:
-                kill_proc(proc)
-                _dump_plugin_diag_log(plugin_diag_log)
+        env = _build_launch_env(scene_path, plugin_diag_log, deadline_farm["env_overlay"])
+        proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
+        try:
+            staged_bundle = _drive_submitter_ui(proc, history_dir)
+            _copy_bundle_files(staged_bundle, job_bundle_generated)
+        finally:
+            kill_proc(proc)
+            _dump_plugin_diag_log(plugin_diag_log)
     finally:
         rmtree(bundle_staging, ignore_errors=True)
         log(f"removed staging dir: {bundle_staging}")
@@ -639,7 +639,21 @@ def test_integ(
         cinema4d_location=cinema4d_location,
         scene_path=scene_path,
         job_bundle_generated=job_bundle_generated,
+        deadline_farm=deadline_farm,
     )
+
+    # The submitter ran against the mock backend, not real AWS. Prove its calls
+    # reached our server and nothing hit an unmocked route. call_counts lives in
+    # this process; the C4D subprocess populated it over HTTP.
+    backend = deadline_farm["backend"]
+    log(f"mock backend call_counts: {dict(backend.call_counts)}")
+    assert (
+        backend.unmatched_requests == []
+    ), f"submitter hit routes the mock doesn't implement: {backend.unmatched_requests}"
+    for op in ("ListFarms", "GetFarm", "GetQueue", "ListQueueEnvironments", "GetQueueEnvironment"):
+        assert (
+            backend.call_counts.get(op, 0) >= 1
+        ), f"expected the submitter to call {op}; saw {dict(backend.call_counts)}"
 
     assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
 

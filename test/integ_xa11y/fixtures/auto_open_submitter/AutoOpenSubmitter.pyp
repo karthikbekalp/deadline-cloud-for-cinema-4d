@@ -17,10 +17,20 @@ Once the application has finished starting (``C4DPL_PROGRAM_STARTED``) this plug
    dispatches into the shipped plugin's registered command — the same entry point
    a user hits by clicking ``Extensions > AWS Deadline Cloud Submitter``.
 
-The submitter's AWS calls go to the real Deadline Cloud service using the
-machine's ambient credentials and default config; this plugin does not touch
-botocore's endpoint or host-prefix handling. The test then drives the resulting
-Qt dialog with xa11y.
+Where the submitter's AWS calls go depends on the test mode:
+
+* Default: the real Deadline Cloud service, using the machine's ambient
+  credentials and default config. The plugin does not touch botocore's endpoint
+  or host-prefix handling.
+* Offline/mock mode (``DEADLINE_CLOUD_MOCK_MODE=1``): the test points the
+  submitter at a local mock backend via ``AWS_ENDPOINT_URL_DEADLINE``. Because
+  the Deadline service model injects a ``management.`` host prefix
+  (``management.<host>``), this plugin patches ``socket.getaddrinfo`` so any
+  ``management.*`` host resolves to ``127.0.0.1`` -- otherwise the prefixed host
+  would not resolve to the loopback mock. The patch is gated on the env var, so
+  the real-service path is completely unaffected.
+
+The test then drives the resulting Qt dialog with xa11y.
 """
 import os
 import traceback
@@ -47,6 +57,40 @@ def _diag(msg):
             f.write(f"{msg}\n")
     except Exception:
         pass
+
+
+def _install_management_host_redirect():
+    """Offline-mode only: make botocore's ``management.``-prefixed Deadline host
+    resolve to the loopback mock.
+
+    The Deadline service model injects a ``management.`` host prefix onto every
+    operation, so a client pointed at ``http://127.0.0.1:<port>`` via
+    ``AWS_ENDPOINT_URL_DEADLINE`` actually tries to connect to
+    ``management.127.0.0.1`` (and, for a ``localhost`` endpoint,
+    ``management.localhost``), which won't resolve to the mock. We patch
+    ``socket.getaddrinfo`` so any host starting with ``management.`` resolves to
+    ``127.0.0.1``. Gated on ``DEADLINE_CLOUD_MOCK_MODE`` so the real-service path
+    is never touched.
+    """
+    if os.environ.get("DEADLINE_CLOUD_MOCK_MODE") != "1":
+        return
+    try:
+        import socket
+
+        if getattr(socket, "_deadline_mgmt_redirect_installed", False):
+            return
+        _orig_getaddrinfo = socket.getaddrinfo
+
+        def _patched_getaddrinfo(host, *args, **kwargs):
+            if isinstance(host, str) and host.startswith("management."):
+                host = "127.0.0.1"
+            return _orig_getaddrinfo(host, *args, **kwargs)
+
+        socket.getaddrinfo = _patched_getaddrinfo
+        socket._deadline_mgmt_redirect_installed = True
+        _diag("management.* -> 127.0.0.1 getaddrinfo redirect installed (mock mode)")
+    except Exception as e:
+        _diag(f"management host redirect install failed: {e!r}")
 
 
 def _install_diag_log_capture():
@@ -101,6 +145,119 @@ def _install_diag_log_capture():
         _diag(f"excepthook install failed: {e!r}")
 
 
+def _install_api_call_logger():
+    """DIAGNOSTIC / DISCOVERY: log every AWS API call the submitter makes.
+
+    Every boto3 client method (deadline, s3, sts, paginated and retried calls
+    alike) funnels through ``botocore.client.BaseClient._make_api_call``, so
+    wrapping that single method captures the complete, real set of AWS
+    operations the Export-bundle flow invokes against the live farm -- including
+    anything indirect or paginated that reading the source would miss.
+
+    Two log destinations, both opt-in via env var:
+
+    * ``DEADLINE_CLOUD_API_LOG`` (falls back to ``DEADLINE_CLOUD_DIAG_LOG``):
+      one human-readable ``API-CALL <service> <operation> <ms>ms`` line per
+      call, with a ``FAILED`` variant so calls that errored are still counted.
+    * ``DEADLINE_CLOUD_API_TRACE``: one JSON object per line capturing the
+      service, operation, request params, response body (minus the noisy
+      ``ResponseMetadata``), elapsed milliseconds, and ok/error -- so a later
+      phase can seed the offline mock and the golden bundle from REAL response
+      data rather than hand-written guesses.
+
+    Capturing real bodies and timings is what lets the offline mock be grounded
+    on observed reality: we replay what the live service actually returned.
+    """
+    try:
+        import json
+        import time
+        from datetime import datetime
+        from botocore.client import BaseClient
+
+        api_log_path = os.environ.get("DEADLINE_CLOUD_API_LOG") or os.environ.get(
+            "DEADLINE_CLOUD_DIAG_LOG"
+        )
+        api_trace_path = os.environ.get("DEADLINE_CLOUD_API_TRACE")
+
+        def _api_log(msg):
+            if not api_log_path:
+                return
+            try:
+                with open(api_log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{msg}\n")
+            except Exception:
+                pass
+
+        def _json_default(obj):
+            # Deadline/STS responses carry datetimes (createdAt, expiration);
+            # serialize them as ISO-8601 so the trace is valid JSON.
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return repr(obj)
+
+        def _api_trace(record):
+            if not api_trace_path:
+                return
+            try:
+                with open(api_trace_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, default=_json_default) + "\n")
+            except Exception:
+                pass
+
+        if getattr(BaseClient, "_deadline_api_logger_installed", False):
+            return
+        original_make_api_call = BaseClient._make_api_call
+
+        def _logging_make_api_call(self, operation_name, api_params):
+            service = getattr(getattr(self, "meta", None), "service_model", None)
+            service_id = service.endpoint_prefix if service is not None else "unknown"
+            start = time.monotonic()
+            try:
+                result = original_make_api_call(self, operation_name, api_params)
+                elapsed_ms = (time.monotonic() - start) * 1000.0
+                _api_log(f"API-CALL {service_id} {operation_name} {elapsed_ms:.0f}ms")
+                # Drop ResponseMetadata (request ids, headers) -- noise for
+                # replay, and varies per call.
+                body = (
+                    {k: v for k, v in result.items() if k != "ResponseMetadata"}
+                    if isinstance(result, dict)
+                    else result
+                )
+                _api_trace(
+                    {
+                        "service": service_id,
+                        "operation": operation_name,
+                        "params": api_params,
+                        "elapsed_ms": round(elapsed_ms, 1),
+                        "ok": True,
+                        "response": body,
+                    }
+                )
+                return result
+            except Exception as e:
+                elapsed_ms = (time.monotonic() - start) * 1000.0
+                _api_log(
+                    f"API-CALL {service_id} {operation_name} {elapsed_ms:.0f}ms FAILED {e!r}"
+                )
+                _api_trace(
+                    {
+                        "service": service_id,
+                        "operation": operation_name,
+                        "params": api_params,
+                        "elapsed_ms": round(elapsed_ms, 1),
+                        "ok": False,
+                        "error": repr(e),
+                    }
+                )
+                raise
+
+        BaseClient._make_api_call = _logging_make_api_call
+        BaseClient._deadline_api_logger_installed = True
+        _diag(f"API call logger installed (log -> {api_log_path}, trace -> {api_trace_path})")
+    except Exception as e:
+        _diag(f"API call logger install failed: {e!r}")
+
+
 def _load_active_scene(scene_path):
     """Load ``scene_path`` and set it as the active document so the submitter sees
     a real document with a valid path."""
@@ -141,6 +298,10 @@ def PluginMessage(id, data):
     if id == c4d.C4DPL_PROGRAM_STARTED:
         _diag("C4DPL_PROGRAM_STARTED: auto-opening submitter for integ test")
         _install_diag_log_capture()
+        _install_api_call_logger()
+        # Must run before the submitter opens so its first API call is already
+        # redirected to the loopback mock (no-op unless DEADLINE_CLOUD_MOCK_MODE=1).
+        _install_management_host_redirect()
 
         scene_path = os.environ.get("DEADLINE_CLOUD_SCENE_PATH", "")
         if scene_path:
