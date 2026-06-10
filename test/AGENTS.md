@@ -14,6 +14,13 @@ test/
 │   ├── test_cinema4d.py     # Parametrized test runner
 │   ├── conftest.py          # Test fixtures
 │   └── utils.py             # Test utilities
+├── integ_xa11y/             # xa11y-driven submitter test, offline mock backend
+│   ├── test_scenes/         # Test scene definitions (mirrors integ/)
+│   ├── test_cinema4d.py     # Drives the real submitter dialog via xa11y
+│   ├── conftest.py          # Fixtures, incl. deadline_farm (starts the mock)
+│   ├── utils.py             # Test utilities
+│   ├── mock_aws/            # Hand-rolled offline mock Deadline Cloud backend
+│   └── fixtures/            # Test-only sidecar plugin (auto-opens submitter)
 └── installer/               # Installer tests
 ```
 
@@ -105,13 +112,12 @@ directly.
 Once we're confident in this test, the plan is to delete `test/integ/`
 and rename this folder to `test/integ/`.
 
-Unlike the unit tests, this test submits against the **real Deadline Cloud
-service** — there is no mock backend. You must be logged in (valid AWS
-credentials) with a default farm and queue selected (`deadline config` or the
-Deadline Cloud monitor); the `deadline_farm` fixture fails fast otherwise. The
-generated bundle therefore carries your real farm/queue IDs and Conda
-queue-environment packages, so `expected_job_bundle/` is farm-specific and must
-be regenerated for the farm you run against.
+Runs fully **offline** — no real AWS, no login, no real farm. A hand-rolled mock
+Deadline Cloud backend (`test/integ_xa11y/mock_aws/`) speaks the rest-json
+protocol; the `deadline_farm` fixture starts it and wires the Cinema 4D
+subprocess to it. No credentials or `deadline config` are required, and the
+generated bundle carries only sanitized fake farm/queue IDs, so
+`expected_job_bundle/` is NOT farm-specific.
 
 The test launches the Cinema 4D GUI binary with two plugin directories on
 `g_additionalModulePath`: the real, unmodified
@@ -126,14 +132,64 @@ clicks `Export bundle`, copies the resulting bundle flat into
 `<scene>/generated_bundle/`, then runs `openjd check` and `openjd run`
 against it — same final assertions as the existing test.
 
+#### Offline mock architecture
+
+- **Mock backend** (`mock_aws/deadline.py`): an in-memory Deadline Cloud
+  simulator serving only the five operations the Export-bundle flow was observed
+  to call against a real farm — `ListFarms`, `GetFarm`, `GetQueue`,
+  `ListQueueEnvironments`, `GetQueueEnvironment`. It records `call_counts` /
+  `request_log` / `unmatched_requests` so the test can assert exactly which
+  calls reached it and that nothing hit an unmocked route. Seeded from sanitized
+  real response data in `mock_aws/fixtures_data.py`.
+- **Separate process** (`mock_aws/server_process.py`): the mock runs in its own
+  process, NOT a thread. xa11y's native `wait_*` calls hold the CPython GIL for
+  most of their duration, which would starve an in-process server thread and
+  hang the test for the full 60s timeout. The out-of-process server keeps
+  serving; the test reads its observability over a `GET /__admin__/calls` admin
+  endpoint via a `RemoteBackend` proxy.
+- **Subprocess wiring** (`mock_aws/wiring.py` + the `deadline_farm` fixture):
+  a temp `deadline config` names the mock's farm/queue, and the C4D subprocess
+  env gets `AWS_ENDPOINT_URL_DEADLINE` → mock, dummy AWS creds, telemetry
+  opt-out (so no STS call fires), an isolated `HOME`, and
+  `DEADLINE_CLOUD_MOCK_MODE=1`.
+- **Sidecar mock-mode patches** (gated on `DEADLINE_CLOUD_MOCK_MODE=1`, so the
+  shipped plugin behaviour is untouched for real users):
+  - `management.` → `127.0.0.1` `socket.getaddrinfo` redirect — the Deadline
+    service model injects a `management.` host prefix, which wouldn't resolve to
+    the loopback mock otherwise.
+  - `os.startfile` no-op — stops the submitter popping a File Explorer window at
+    the bundle folder on Windows (it would linger/pile up across runs).
+- **No queue environments**: the mock returns an empty `ListQueueEnvironments`,
+  so there are no Conda parameter widgets for `OpenJDParametersWidget.rebuild_ui`
+  to recreate mid-Export and thus no reload race. Consequence: the exported
+  bundle carries no `CondaPackages` / `CondaChannels`, and the expected bundles
+  omit them too.
+- **No S3 / STS mock**: Export writes the bundle to disk (no upload), and
+  telemetry — the only STS caller — is opted out. Only Deadline is mocked.
+
 ```bash
 hatch run integ-xa11y:test                        # all xa11y integ tests
-hatch run integ-xa11y:test -k cube                # one parametrization
+```
+
+The `integ-xa11y:test` script hardcodes the `test/integ_xa11y` path and
+`--numprocesses=1`. Beware: any args you pass *replace* the path (hatch
+`{args:test/integ_xa11y}` falls back to the global `testpaths = ["test"]`), so
+`hatch run integ-xa11y:test -k cube` would scan the whole `test/` tree. To
+filter or run in-process (e.g. to see C4D/xa11y stdout, which xdist hides), call
+pytest directly with an explicit path — the test spawns its own subprocesses
+regardless of `--numprocesses`:
+
+```bash
+hatch -e integ-xa11y run pytest --no-cov test/integ_xa11y/test_cinema4d.py \
+    --numprocesses=0 -s -k cube
 ```
 
 Caveats:
 - Windows SMF workers run in Session 0 with no interactive desktop, so
   UI Automation returns nothing there. Local interactive sessions only.
+- The mock and the offline wiring are developed/verified on macOS; the
+  Windows-only paths (the `openjd run` render comparison, the `os.startfile`
+  suppression) need a Windows run to confirm.
 
 ## Installer Tests
 

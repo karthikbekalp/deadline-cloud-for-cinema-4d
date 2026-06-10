@@ -27,17 +27,13 @@ UI instead of a direct function call.
 
 ## Prerequisites
 
-This test submits against the **real Deadline Cloud service**, not a mock. Before
-running it you must be logged in and have a default farm + queue selected:
+This test runs **fully offline** against a hand-rolled mock Deadline Cloud
+backend (`mock_aws/`) — **no real AWS, no login, no farm/queue selection**. You
+do not need credentials or a `deadline config`; the `deadline_farm` fixture
+starts the mock and writes a temp config pointing at it.
 
-- Authenticate with the Deadline Cloud monitor (or `aws sso login` for your
-  profile) so the machine has valid AWS credentials.
-- Select a default farm and queue (`deadline config set defaults.farm_id …`
-  and `defaults.queue_id …`, or via the monitor).
-
-The `deadline_farm` fixture fails fast with an actionable message if no
-farm/queue is configured. Pick a queue that has a **Conda queue environment** if
-you want the exported bundle to carry `CondaPackages` / `CondaChannels`.
+The only requirements are an interactive desktop session and Cinema 4D installed
+(see *How to run*).
 
 ## The big picture
 
@@ -45,22 +41,27 @@ you want the exported bundle to carry `CondaPackages` / `CondaChannels`.
 pytest (parent process)
   │
   ├─ deadline_farm fixture
-  │     └─ reads the machine's default deadline config (farm_id + queue_id),
-  │        failing fast if none is selected
+  │     ├─ starts the mock Deadline backend in a SEPARATE process
+  │     │     (own GIL — see "Why a separate process" below)
+  │     ├─ writes a temp deadline config naming the mock's fake farm/queue
+  │     └─ builds the subprocess env overlay (endpoint override, dummy creds,
+  │           telemetry opt-out, isolated HOME, DEADLINE_CLOUD_MOCK_MODE=1)
   │
   ├─ build_cinema4d_scene()  ── runs c4dpy scene.py ──▶ cube.c4d
   │
   └─ launches Cinema 4D GUI (child process)
-         │   env: inherited (real AWS creds + config), two plugin dirs, python path
+         │   env: overlay above + two plugin dirs + python path
          │
          ├─ loads DeadlineCloud.pyp           (real, shipped plugin)
          ├─ loads AutoOpenSubmitter.pyp       (test-only sidecar)
-         │      on C4DPL_PROGRAM_STARTED:
-         │        1. LoadDocument(cube.c4d)
-         │        2. CallCommand(SUBMITTER_PLUGIN_ID)  ◀─ opens real submitter
+         │      on C4DPL_PROGRAM_STARTED (mock mode):
+         │        1. patch socket.getaddrinfo (management.* → 127.0.0.1)
+         │        2. patch os.startfile → no-op (no Explorer popup)
+         │        3. LoadDocument(cube.c4d)
+         │        4. CallCommand(SUBMITTER_PLUGIN_ID)  ◀─ opens real submitter
          │
-         └─ Qt submitter dialog appears
-                ▲
+         └─ Qt submitter dialog appears ──── AWS_ENDPOINT_URL_DEADLINE ───▶ mock
+                ▲                                                          (parent)
                 │ xa11y drives it via the OS accessibility tree
                 │   - wait for dialog
                 │   - wait for queue-env loading to finish
@@ -70,6 +71,7 @@ pytest (parent process)
                 │
    parent ◀────┘ copies bundle flat into <scene>/generated_bundle/
          │
+         ├─ assert the mock saw exactly the expected calls (no unmatched routes)
          ├─ openjd check
          ├─ compare against expected_job_bundle/ (golden files)
          ├─ openjd run  (Windows only)
@@ -81,9 +83,13 @@ pytest (parent process)
 | File | Role |
 |------|------|
 | `test_cinema4d.py` | The test itself. Orchestrates scene build → launch → UI drive → assertions. |
-| `conftest.py` | Fixtures: locate Cinema 4D, set `C4DPYTHONPATH`, and the `deadline_farm` fixture (reads the real default farm/queue). |
+| `conftest.py` | Fixtures: locate Cinema 4D, set `C4DPYTHONPATH`, and the `deadline_farm` fixture (starts the mock backend + builds the subprocess env). |
 | `utils.py` | Helpers: exe resolution, scene build, bundle waiting, golden-bundle + image comparison. |
-| `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin that auto-opens the real submitter. Never shipped. |
+| `mock_aws/deadline.py` | In-memory mock Deadline Cloud backend (rest-json) + HTTP server, with observability (`call_counts`, `request_log`, `unmatched_requests`). |
+| `mock_aws/server_process.py` | Runs the mock in a separate process; `RemoteBackend` reads its observability over a `GET /__admin__/calls` admin endpoint. |
+| `mock_aws/wiring.py` | Builds the temp deadline config + subprocess env overlay that point C4D at the mock. |
+| `mock_aws/fixtures_data.py` | Sanitized real response bodies (fake farm/queue IDs) the mock serves. |
+| `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin: auto-opens the real submitter and (in mock mode) applies the getaddrinfo / `os.startfile` patches. Never shipped. |
 | `test_scenes/cube/scene/scene.py` | Builds the one-cube test scene with `c4dpy`. |
 | `test_scenes/cube/expected_job_bundle[_darwin]/` | Golden bundle files to compare against. |
 | `test_scenes/cube/expected_job_output/renders/` | Golden render output to compare against. |
@@ -106,31 +112,63 @@ Two non-obvious details:
   so the helper treats **"the .c4d file exists"** as the source of truth, not
   the exit code.
 
-### 2. Resolve the real farm + queue (`deadline_farm` fixture)
+### 2. Start the mock backend + wire the subprocess (`deadline_farm` fixture)
 
-The submitter dialog makes real AWS calls on open, and this test lets them hit
-the **real Deadline Cloud service**. The `deadline_farm` fixture reads the
-machine's default deadline config (`defaults.farm_id` / `defaults.queue_id`) —
-set up via the Deadline Cloud monitor or `deadline config` — and fails fast with
-an actionable message if no farm/queue is selected. It writes no temp config and
-overrides no AWS endpoint/credential env vars; the Cinema 4D child inherits the
-ambient environment and submits to your configured default farm/queue.
+The submitter dialog makes AWS calls on open. Instead of letting them hit real
+AWS, the `deadline_farm` fixture stands up a local mock and points the C4D
+subprocess at it:
 
-The dialog talks to:
+1. **Starts the mock Deadline backend** (`mock_aws/`) — an in-memory simulator
+   speaking the Deadline rest-json protocol, seeded with one fake farm, queue,
+   and (empty) queue-environment list. It records every served request, so the
+   test can assert exactly which operations the submitter made.
+2. **Writes a temp `deadline config`** naming the mock's fake `farm_id` /
+   `queue_id`, pointed at via `DEADLINE_CONFIG_FILE_PATH`. The bundle's
+   `job_history_dir` is set here too, so the export lands in a dir the test
+   controls.
+3. **Builds the subprocess env overlay** (`mock_aws/wiring.py`):
+   `AWS_ENDPOINT_URL_DEADLINE` → mock, dummy static AWS creds, an isolated
+   `HOME`, `DEADLINE_CLOUD_TELEMETRY_OPT_OUT=true`, and
+   `DEADLINE_CLOUD_MOCK_MODE=1`.
 
-- **STS** `GetCallerIdentity` — the dialog's auth probe.
-- **Deadline** `GetFarm`, `GetQueue`, `ListQueueEnvironments`,
-  `GetQueueEnvironment` (plus list variants) — to populate farm/queue and the
-  queue-environment parameters.
+The submitter ends up calling four Deadline operations — `ListFarms` (auth
+probe), `GetFarm`, `GetQueue`, `ListQueueEnvironments` — all served by the mock.
+`GetQueueEnvironment` is *not* called because the queue-env list comes back
+empty (the mock implements that route, but the submitter has no env to fetch).
+**No STS** call fires because telemetry (its only caller) is opted out, and **no
+S3** because Export writes to disk without uploading. The mock's observability
+is read back via a `RemoteBackend` proxy and asserted after export (expected
+calls present, no unmatched routes).
 
-`override_job_history_dir` in the parent and the child both read the same
-default config, so the bundle export still lands under the staging dir the test
-controls.
+> Because the mock returns fake, sanitized farm/queue IDs and an **empty
+> queue-environment list**, the exported bundle is **not** farm-specific and
+> carries **no** `CondaPackages` / `CondaChannels`. The golden
+> `expected_job_bundle/` files reflect that and need no per-farm regeneration.
 
-> Because the bundle now carries your real farm/queue IDs, names, and the real
-> Conda queue-environment packages, the golden `expected_job_bundle/` files are
-> farm-specific. Regenerate them for your farm (see *Golden-bundle
-> normalizations*) or the equality assertion will fail.
+#### Why a separate process (not a thread)
+
+The mock HTTP server runs in its **own process**, not a daemon thread in the
+pytest process. xa11y is a native extension whose `wait_*` calls hold the
+CPython GIL for most of their duration. If the server were an in-process thread,
+the test's `wait_hidden(timeout=60s)` would starve it — it couldn't answer the
+submitter's HTTP calls, the queue-environment load would never complete, and the
+test would hang for the full 60s. An out-of-process server has its own GIL and
+keeps serving; the test reads its `call_counts` / `request_log` /
+`unmatched_requests` over a `GET /__admin__/calls` admin endpoint.
+
+#### Why the sidecar patches `getaddrinfo` and `os.startfile` (mock mode)
+
+Both are gated on `DEADLINE_CLOUD_MOCK_MODE=1`, so shipped behaviour is
+untouched for real users:
+
+- **`management.` → `127.0.0.1` getaddrinfo redirect** — the Deadline service
+  model injects a `management.` host prefix onto every operation, so a client
+  pointed at `127.0.0.1` actually tries `management.127.0.0.1`, which wouldn't
+  resolve to the loopback mock. The patch rewrites any `management.*` host to
+  `127.0.0.1`.
+- **`os.startfile` → no-op** — on Windows the submitter calls
+  `os.startfile(bundle_dir)` after Export, popping a File Explorer window that
+  would linger and pile up across runs. The patch suppresses it.
 
 ### 3. Launch Cinema 4D with two plugins
 
@@ -188,13 +226,17 @@ accessible name — popups surface differently across UIA and AX, so the file on
 disk is the reliable signal. The success popup is dismissed *if* found, but a
 miss is non-fatal.
 
-The submitter always writes to `<job_history_dir>/<YYYY-mm>/<bundle-name>/`, so
-the test overrides `job_history_dir` to a temp staging dir, then copies the
-bundle files **flat** into `generated_bundle/` to match the layout the
-assertions expect.
+The submitter always writes to `<job_history_dir>/<YYYY-mm>/<bundle-name>/`. The
+`job_history_dir` is set in the temp deadline config the `deadline_farm` fixture
+wrote (read inside the C4D subprocess), so the bundle lands in a dir the test
+controls; the test then copies the bundle files **flat** into
+`generated_bundle/` to match the layout the assertions expect.
 
 ### 7. Assertions
 
+- The mock saw exactly the expected calls (`ListFarms`, `GetFarm`, `GetQueue`,
+  `ListQueueEnvironments`) and **no** request hit an unmocked route — proving the
+  submitter ran against the mock, not real AWS.
 - `assert_is_valid_job_bundle` → `openjd check` returns `success`.
 - `assert_expected_job_bundle_and_generated_job_bundle_are_equal` → compares the
   three bundle files after normalizations (see below).
@@ -214,9 +256,12 @@ normalizes a fixed set of moving parts:
 
 - `PATH_TO_BE_REPLACED` → the local absolute repo prefix.
 - Backslashes → forward slashes (preserving unicode escapes).
-- Conda package versions (`cinema4d=…`) → a fixed placeholder.
 - `SubmitterIntegrationVersion` (changes every build) → a fixed placeholder.
 - `jobEnvironments` is stripped from `template.yaml` before comparison.
+
+(A Conda-package-version normalization also exists but is now a no-op: the mock
+returns no queue environments, so the bundle carries no `CondaPackages` /
+`CondaChannels` to normalize.)
 
 The final assertion requires exactly the three expected files
 (`template.yaml`, `parameter_values.yaml`, `asset_references.yaml`) to match.
@@ -238,17 +283,35 @@ only works in a local interactive session.
 
 ```bash
 hatch run integ-xa11y:test            # all xa11y integ tests
-hatch run integ-xa11y:test -k cube    # just the cube parametrization
 ```
 
-Cinema 4D location resolves from `C4D_LOCATION`, else `C4D_VERSION` + platform
-default, else a scan of known install paths (newest first). The farm/queue come
-from the machine's default deadline config (see *Prerequisites*).
+The `integ-xa11y:test` script hardcodes the `test/integ_xa11y` path and
+`--numprocesses=1`. Args you pass *replace* that path (hatch
+`{args:test/integ_xa11y}` falls back to the global `testpaths = ["test"]`), so
+`hatch run integ-xa11y:test -k cube` would scan the whole `test/` tree. To
+filter or run in-process (e.g. `-s` to see C4D/xa11y stdout, which xdist hides),
+invoke pytest directly with an explicit path — the test spawns its own
+subprocesses regardless of `--numprocesses`:
+
+```bash
+hatch -e integ-xa11y run pytest --no-cov test/integ_xa11y/test_cinema4d.py \
+    --numprocesses=0 -s -k cube
+```
+
+No AWS login or farm/queue selection is needed (the mock provides them). Cinema
+4D location resolves from `C4D_LOCATION`, else `C4D_VERSION` + platform default,
+else a scan of known install paths (newest first).
 
 ## Extending the test
 
 - **New scene:** add `test_scenes/<name>/scene/scene.py`, an
   `expected_job_bundle/` (and `_darwin` variant if needed), and
   `expected_job_output/renders/`, then add `<name>` to the `@parametrize` list
-  in `test_cinema4d.py`. Because the bundle is farm-specific, regenerate the
-  expected files against the farm you run with.
+  in `test_cinema4d.py`. The bundle is **not** farm-specific (the mock provides
+  fake, stable farm/queue IDs and no queue environments), so the expected files
+  are portable and don't need per-farm regeneration.
+- **New mocked operation:** if a submitter change makes it call a Deadline
+  operation the mock doesn't implement, the test will fail its
+  `unmatched_requests` assertion (and the mock logs a `404 NO ROUTE`). Add a
+  `@route`-decorated handler in `mock_aws/deadline.py` and, if it returns
+  resource data, seed it in `mock_aws/fixtures_data.py`.
