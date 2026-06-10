@@ -105,6 +105,14 @@ directly.
 Once we're confident in this test, the plan is to delete `test/integ/`
 and rename this folder to `test/integ/`.
 
+Unlike the unit tests, this test submits against the **real Deadline Cloud
+service** — there is no mock backend. You must be logged in (valid AWS
+credentials) with a default farm and queue selected (`deadline config` or the
+Deadline Cloud monitor); the `deadline_farm` fixture fails fast otherwise. The
+generated bundle therefore carries your real farm/queue IDs and Conda
+queue-environment packages, so `expected_job_bundle/` is farm-specific and must
+be regenerated for the farm you run against.
+
 The test launches the Cinema 4D GUI binary with two plugin directories on
 `g_additionalModulePath`: the real, unmodified
 `deadline_cloud_extension/DeadlineCloud.pyp` and a test-only sidecar plugin

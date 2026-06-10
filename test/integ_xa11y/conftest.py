@@ -8,19 +8,12 @@ import pytest
 import os
 import site
 import sys
-import tempfile
-import textwrap
-from typing import Iterator
 
 from pathlib import Path
 
-from .utils import resolve_c4d_exe
+from deadline.client.config import get_setting
 
-from .mock_deadline_backend import (
-    MockDeadlineFarm,
-    start_heartbeat,
-    start_mock_servers_subprocess,
-)
+from .utils import resolve_c4d_exe
 
 # Default install paths per version and platform.
 # Order matters: when scanning for an installed C4D without C4D_LOCATION /
@@ -128,108 +121,28 @@ def test_scenes_folder_location() -> Path:
     return Path(__file__).parent / "test_scenes"
 
 
-# Cinema 4D's bundled Python injects this on every interpreter start and
-# patches botocore's _urljoin so the `management.` host prefix that
-# Deadline applies to every API call is dropped. Without it, requests
-# would hit `http://management.127.0.0.1:<port>/...` and miss the mock.
-_HOST_PREFIX_SHIM = textwrap.dedent(
-    """
-    import botocore.awsrequest as _ar
-    _orig = _ar._urljoin
-    def _urljoin(endpoint_url, url_path, host_prefix):
-        return _orig(endpoint_url, url_path, None)
-    _ar._urljoin = _urljoin
-    """
-).strip() + "\n"
-
-
 @pytest.fixture
-def mock_deadline_farm() -> Iterator[dict]:
-    """Spin up an in-memory Deadline Cloud + STS HTTP server pair, seed a
-    farm + queue, write a tmp deadline-client config that points at them,
-    and yield the env vars needed by a child process (Cinema 4D).
+def deadline_farm() -> dict:
+    """Resolve the real Deadline Cloud farm + queue this run submits to.
 
-    The submitter dialog talks to:
-      * sts:GetCallerIdentity (auth probe) → mock STS server
-      * deadline:ListQueueEnvironments + GetQueue + GetFarm → mock Deadline server
+    The submitter dialog talks to the live Deadline Cloud service (and STS for
+    its auth probe) using whatever credentials and default profile the machine
+    is already logged into — set up via the Deadline Cloud monitor or
+    `deadline config`. We don't write a temp config or override any AWS
+    endpoint/credential env vars; the Cinema 4D child inherits the ambient
+    environment and reads the same default config this fixture validates.
 
-    Both run on 127.0.0.1 with ephemeral ports, daemon threads, and shut
-    down on fixture teardown.
+    Fails fast with an actionable message if no farm/queue is selected, so the
+    test reports "log in and pick a farm" rather than a confusing dialog error.
     """
-    farm = MockDeadlineFarm()
-    farm_id = farm.farm_id
-    queue_id = farm.queue_id
-
-    # EXPERIMENT (Phase A): run the mock servers in a SEPARATE PROCESS instead of
-    # background threads in this pytest process. The heartbeat proved the
-    # in-process servers get GIL-starved whenever the main thread is parked in an
-    # xa11y native wait. A separate process has its own GIL, so it should keep
-    # answering the submitter's API calls regardless of what xa11y is doing here.
-    servers, deadline_url, sts_url = start_mock_servers_subprocess(farm)
-
-    # DIAGNOSTIC: heartbeat still runs in THIS (parent) process. With the servers
-    # moved out, the parent threads will still show starvation gaps during xa11y
-    # waits -- that's expected and fine now; what matters is the child process
-    # keeps serving. The heartbeat lets us confirm the parent is still getting
-    # starved (proving the servers needed to move) while the test now passes.
-    stop_heartbeat = start_heartbeat()
-
-    tmpdir = Path(tempfile.mkdtemp(prefix="c4d-mock-deadline-"))
-    config_path = tmpdir / "deadline_config"
-    config_path.write_text(
-        "[profile-(default)]\n"
-        "aws_profile_name = (default)\n"
-        "\n"
-        "[profile-(default) defaults]\n"
-        f"farm_id = {farm_id}\n"
-        "\n"
-        f"[profile-(default) {farm_id} defaults]\n"
-        f"queue_id = {queue_id}\n"
-        "\n"
-        "[telemetry]\n"
-        "opt_out = true\n",
-        encoding="utf-8",
-    )
-
-    shim_dir = tmpdir / "shim"
-    shim_dir.mkdir()
-    (shim_dir / "sitecustomize.py").write_text(_HOST_PREFIX_SHIM, encoding="utf-8")
-
-    env = {
-        "AWS_ENDPOINT_URL_DEADLINE": deadline_url,
-        "AWS_ENDPOINT_URL_STS": sts_url,
-        "AWS_ACCESS_KEY_ID": "ACCESSKEY",
-        "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-        "AWS_SESSION_TOKEN": "testing",
-        "AWS_DEFAULT_REGION": "us-west-2",
-        "DEADLINE_CONFIG_FILE_PATH": str(config_path),
-    }
-
-    # Also point the parent test process at the tmp config so that
-    # override_job_history_dir (via deadline.client.config.set_setting)
-    # writes to the same file the child Cinema 4D process reads.
-    prev_config_env = os.environ.get("DEADLINE_CONFIG_FILE_PATH")
-    os.environ["DEADLINE_CONFIG_FILE_PATH"] = str(config_path)
-
-    try:
-        yield {
-            "farm": farm,
-            "farm_id": farm_id,
-            "queue_id": queue_id,
-            "deadline_url": deadline_url,
-            "sts_url": sts_url,
-            "shim_dir": str(shim_dir),
-            "env": env,
-        }
-    finally:
-        stop_heartbeat()
-        if prev_config_env is None:
-            os.environ.pop("DEADLINE_CONFIG_FILE_PATH", None)
-        else:
-            os.environ["DEADLINE_CONFIG_FILE_PATH"] = prev_config_env
-        # Tears down the out-of-process mock servers (terminates the child).
-        servers.shutdown()
-        servers.server_close()
-        from shutil import rmtree
-
-        rmtree(tmpdir, ignore_errors=True)
+    farm_id = get_setting("defaults.farm_id")
+    queue_id = get_setting("defaults.queue_id")
+    if not farm_id or not queue_id:
+        raise EnvironmentError(
+            "No default Deadline Cloud farm/queue is configured "
+            f"(farm_id={farm_id!r}, queue_id={queue_id!r}). Log in with the "
+            "Deadline Cloud monitor (or run `deadline config`) and select a "
+            "farm and queue before running this test."
+        )
+    print(f"Using real Deadline Cloud farm {farm_id} / queue {queue_id}")
+    return {"farm_id": farm_id, "queue_id": queue_id}

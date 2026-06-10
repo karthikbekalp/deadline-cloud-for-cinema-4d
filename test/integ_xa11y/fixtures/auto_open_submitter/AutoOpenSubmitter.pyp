@@ -9,17 +9,18 @@ plugin exactly as a customer would, while no test-only code reaches production.
 
 Once the application has finished starting (``C4DPL_PROGRAM_STARTED``) this plugin:
 
-1. Strips botocore's ``management.`` host prefix so the submitter's AWS calls reach
-   the in-process 127.0.0.1 mock backend instead of ``management.127.0.0.1``.
-2. Loads the test scene named by ``DEADLINE_CLOUD_SCENE_PATH`` and makes it the
+1. Loads the test scene named by ``DEADLINE_CLOUD_SCENE_PATH`` and makes it the
    active document. Cinema 4D ignores argv file arguments on macOS (files only
    arrive via Apple Events), so the scene is passed by env var and opened here,
    giving the submitter a document with a valid path.
-3. Opens the real submitter via ``c4d.CallCommand(SUBMITTER_PLUGIN_ID)``, which
+2. Opens the real submitter via ``c4d.CallCommand(SUBMITTER_PLUGIN_ID)``, which
    dispatches into the shipped plugin's registered command — the same entry point
    a user hits by clicking ``Extensions > AWS Deadline Cloud Submitter``.
 
-The test then drives the resulting Qt dialog with xa11y.
+The submitter's AWS calls go to the real Deadline Cloud service using the
+machine's ambient credentials and default config; this plugin does not touch
+botocore's endpoint or host-prefix handling. The test then drives the resulting
+Qt dialog with xa11y.
 """
 import os
 import traceback
@@ -100,27 +101,6 @@ def _install_diag_log_capture():
         _diag(f"excepthook install failed: {e!r}")
 
 
-def _strip_botocore_host_prefix():
-    """Drop the ``management.`` host prefix botocore injects on every Deadline API
-    call so requests hit the 127.0.0.1 mock rather than management.127.0.0.1.
-
-    Done here (not at import time) because the submitter's dependencies are not on
-    sys.path until Cinema 4D finishes initializing.
-    """
-    try:
-        import botocore.awsrequest as awsrequest
-
-        original_urljoin = awsrequest._urljoin
-
-        def _urljoin_without_host_prefix(endpoint_url, url_path, host_prefix):
-            return original_urljoin(endpoint_url, url_path, None)
-
-        awsrequest._urljoin = _urljoin_without_host_prefix
-        _diag("botocore host-prefix patch applied")
-    except Exception as e:
-        _diag(f"botocore host-prefix patch failed: {e!r}")
-
-
 def _load_active_scene(scene_path):
     """Load ``scene_path`` and set it as the active document so the submitter sees
     a real document with a valid path."""
@@ -161,7 +141,6 @@ def PluginMessage(id, data):
     if id == c4d.C4DPL_PROGRAM_STARTED:
         _diag("C4DPL_PROGRAM_STARTED: auto-opening submitter for integ test")
         _install_diag_log_capture()
-        _strip_botocore_host_prefix()
 
         scene_path = os.environ.get("DEADLINE_CLOUD_SCENE_PATH", "")
         if scene_path:

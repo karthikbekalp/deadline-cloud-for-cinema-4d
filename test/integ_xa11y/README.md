@@ -25,27 +25,39 @@ UI instead of a direct function call.
 > rename this folder to `test/integ/`. That's why several helpers here are
 > deliberately kept byte-for-byte identical to their `test/integ/` counterparts.
 
+## Prerequisites
+
+This test submits against the **real Deadline Cloud service**, not a mock. Before
+running it you must be logged in and have a default farm + queue selected:
+
+- Authenticate with the Deadline Cloud monitor (or `aws sso login` for your
+  profile) so the machine has valid AWS credentials.
+- Select a default farm and queue (`deadline config set defaults.farm_id …`
+  and `defaults.queue_id …`, or via the monitor).
+
+The `deadline_farm` fixture fails fast with an actionable message if no
+farm/queue is configured. Pick a queue that has a **Conda queue environment** if
+you want the exported bundle to carry `CondaPackages` / `CondaChannels`.
+
 ## The big picture
 
 ```
 pytest (parent process)
   │
-  ├─ mock_deadline_farm fixture
-  │     ├─ starts mock Deadline HTTP server   (127.0.0.1:<ephemeral>)
-  │     ├─ starts mock STS HTTP server        (127.0.0.1:<ephemeral>)
-  │     └─ writes a temp deadline-client config pointing at them
+  ├─ deadline_farm fixture
+  │     └─ reads the machine's default deadline config (farm_id + queue_id),
+  │        failing fast if none is selected
   │
   ├─ build_cinema4d_scene()  ── runs c4dpy scene.py ──▶ cube.c4d
   │
   └─ launches Cinema 4D GUI (child process)
-         │   env: AWS endpoints → mocks, two plugin dirs, python path + shim
+         │   env: inherited (real AWS creds + config), two plugin dirs, python path
          │
          ├─ loads DeadlineCloud.pyp           (real, shipped plugin)
          ├─ loads AutoOpenSubmitter.pyp       (test-only sidecar)
          │      on C4DPL_PROGRAM_STARTED:
-         │        1. patch botocore host prefix
-         │        2. LoadDocument(cube.c4d)
-         │        3. CallCommand(SUBMITTER_PLUGIN_ID)  ◀─ opens real submitter
+         │        1. LoadDocument(cube.c4d)
+         │        2. CallCommand(SUBMITTER_PLUGIN_ID)  ◀─ opens real submitter
          │
          └─ Qt submitter dialog appears
                 ▲
@@ -69,8 +81,7 @@ pytest (parent process)
 | File | Role |
 |------|------|
 | `test_cinema4d.py` | The test itself. Orchestrates scene build → launch → UI drive → assertions. |
-| `conftest.py` | Fixtures: locate Cinema 4D, set `C4DPYTHONPATH`, and the `mock_deadline_farm` fixture. |
-| `mock_deadline_backend.py` | In-process HTTP mocks for the Deadline and STS APIs the dialog calls. |
+| `conftest.py` | Fixtures: locate Cinema 4D, set `C4DPYTHONPATH`, and the `deadline_farm` fixture (reads the real default farm/queue). |
 | `utils.py` | Helpers: exe resolution, scene build, bundle waiting, golden-bundle + image comparison. |
 | `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin that auto-opens the real submitter. Never shipped. |
 | `test_scenes/cube/scene/scene.py` | Builds the one-cube test scene with `c4dpy`. |
@@ -95,37 +106,33 @@ Two non-obvious details:
   so the helper treats **"the .c4d file exists"** as the source of truth, not
   the exit code.
 
-### 2. Stand up the mock backend (`mock_deadline_farm` fixture)
+### 2. Resolve the real farm + queue (`deadline_farm` fixture)
 
-The submitter dialog makes real AWS calls on open. Rather than require a live
-farm, the fixture starts two tiny `http.server` instances on `127.0.0.1`:
+The submitter dialog makes real AWS calls on open, and this test lets them hit
+the **real Deadline Cloud service**. The `deadline_farm` fixture reads the
+machine's default deadline config (`defaults.farm_id` / `defaults.queue_id`) —
+set up via the Deadline Cloud monitor or `deadline config` — and fails fast with
+an actionable message if no farm/queue is selected. It writes no temp config and
+overrides no AWS endpoint/credential env vars; the Cinema 4D child inherits the
+ambient environment and submits to your configured default farm/queue.
 
-- **Mock Deadline** serves the routes the dialog hits at startup: `GetFarm`,
-  `GetQueue`, `ListQueueEnvironments`, `GetQueueEnvironment` (plus list
-  variants). Any unmocked route returns **400 with a helpful message** so a new
-  API dependency fails loudly instead of silently passing.
-- **Mock STS** answers `GetCallerIdentity` (the dialog's auth probe) with a
-  canned XML identity. Note STS uses the XML query protocol, not JSON.
+The dialog talks to:
 
-The fixture writes a temp `deadline_config` file seeding the farm/queue IDs and
-points both the child process **and** the parent (via
-`DEADLINE_CONFIG_FILE_PATH`) at it, so `override_job_history_dir` in the parent
-writes to the same config the child reads.
+- **STS** `GetCallerIdentity` — the dialog's auth probe.
+- **Deadline** `GetFarm`, `GetQueue`, `ListQueueEnvironments`,
+  `GetQueueEnvironment` (plus list variants) — to populate farm/queue and the
+  queue-environment parameters.
 
-### 3. The `management.` host-prefix problem
+`override_job_history_dir` in the parent and the child both read the same
+default config, so the bundle export still lands under the staging dir the test
+controls.
 
-This is the subtlest part of the whole test. botocore injects a `management.`
-host prefix on every Deadline API call, so requests would go to
-`http://management.127.0.0.1:<port>/...` and miss the mock. The fix is to patch
-`botocore.awsrequest._urljoin` to drop the prefix. It's applied in **two
-places** because two different interpreters make calls:
+> Because the bundle now carries your real farm/queue IDs, names, and the real
+> Conda queue-environment packages, the golden `expected_job_bundle/` files are
+> farm-specific. Regenerate them for your farm (see *Golden-bundle
+> normalizations*) or the equality assertion will fail.
 
-- **`AutoOpenSubmitter.pyp`** patches it inside the C4D process (where the
-  submitter actually runs).
-- **`conftest.py`** writes a `sitecustomize.py` shim onto `C4DPYTHONPATH` so
-  C4D's bundled Python applies the same patch on interpreter start.
-
-### 4. Launch Cinema 4D with two plugins
+### 3. Launch Cinema 4D with two plugins
 
 `test_cinema4d.py` builds the child environment and puts **two** directories on
 `g_additionalModulePath`:
@@ -139,23 +146,22 @@ would, and no test-only code ever reaches production. The `_prepend` helper
 joins paths with `;` (C4D's separator on every platform — not the OS pathsep)
 and avoids a trailing separator, which C4D would otherwise mis-parse.
 
-### 5. The sidecar auto-opens the submitter (`AutoOpenSubmitter.pyp`)
+### 4. The sidecar auto-opens the submitter (`AutoOpenSubmitter.pyp`)
 
 On `C4DPL_PROGRAM_STARTED` the sidecar:
 
-1. Patches the botocore host prefix (see §3).
-2. Loads `cube.c4d` (named via `DEADLINE_CLOUD_SCENE_PATH`) and makes it the
+1. Loads `cube.c4d` (named via `DEADLINE_CLOUD_SCENE_PATH`) and makes it the
    active document. This is needed because `C4DPL_PROGRAM_STARTED` fires
    *before* C4D processes argv file arguments, and on macOS argv files are
    ignored entirely (files only arrive via Apple Events). Passing the scene by
    env var sidesteps both.
-3. Calls `c4d.CallCommand(SUBMITTER_PLUGIN_ID)` — the **same entry point** as
+2. Calls `c4d.CallCommand(SUBMITTER_PLUGIN_ID)` — the **same entry point** as
    clicking `Extensions > AWS Deadline Cloud Submitter`.
 
 It logs every step to `DEADLINE_CLOUD_DIAG_LOG` because C4D's stdout is detached
 from pytest; the test reads this file back on teardown to surface failures.
 
-### 6. Drive the dialog with xa11y
+### 5. Drive the dialog with xa11y
 
 xa11y attaches to the C4D process by PID, then finds the dialog. **Where the
 dialog lives differs by platform**, and this is the second subtle area:
@@ -174,7 +180,7 @@ The test then: waits for the dialog, waits for "Loading Queue Environments" to
 disappear (non-fatal if it times out), waits for the Export button to be visible
 and enabled, and presses it.
 
-### 7. Bundle on disk is the source of truth
+### 6. Bundle on disk is the source of truth
 
 After pressing Export, the test waits for a bundle to appear under the staging
 dir (`wait_for_bundle`) rather than trying to match the success popup's
@@ -187,7 +193,7 @@ the test overrides `job_history_dir` to a temp staging dir, then copies the
 bundle files **flat** into `generated_bundle/` to match the layout the
 assertions expect.
 
-### 8. Assertions
+### 7. Assertions
 
 - `assert_is_valid_job_bundle` → `openjd check` returns `success`.
 - `assert_expected_job_bundle_and_generated_job_bundle_are_equal` → compares the
@@ -236,13 +242,13 @@ hatch run integ-xa11y:test -k cube    # just the cube parametrization
 ```
 
 Cinema 4D location resolves from `C4D_LOCATION`, else `C4D_VERSION` + platform
-default, else a scan of known install paths (newest first).
+default, else a scan of known install paths (newest first). The farm/queue come
+from the machine's default deadline config (see *Prerequisites*).
 
 ## Extending the test
 
 - **New scene:** add `test_scenes/<name>/scene/scene.py`, an
   `expected_job_bundle/` (and `_darwin` variant if needed), and
   `expected_job_output/renders/`, then add `<name>` to the `@parametrize` list
-  in `test_cinema4d.py`.
-- **New API dependency:** if the dialog starts calling a new Deadline API, the
-  mock returns 400 and tells you to add a route — add it to `MockDeadlineFarm`.
+  in `test_cinema4d.py`. Because the bundle is farm-specific, regenerate the
+  expected files against the farm you run with.

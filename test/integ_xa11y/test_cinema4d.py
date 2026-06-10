@@ -57,9 +57,10 @@ _BUNDLE_ON_DISK_TIMEOUT_S = 30.0
 
 # The Conda queue-environment parameters render under a group labelled
 # "Queue Environment: Conda" containing static_text labels "Conda Packages" and
-# "Conda Channels" (see _CONDA_QUEUE_ENV_TEMPLATE in mock_deadline_backend.py and
-# the live tree dumps in commit history). We gate the Export press on these
-# being present and stable.
+# "Conda Channels" (see the live tree dumps in commit history). This assumes the
+# real queue this test submits to has a Conda queue environment; if yours does
+# not, the gate below times out (non-fatal) and the bundle won't carry Conda
+# params. We gate the Export press on these being present and stable.
 _CONDA_PARAMS_SELECTOR = (
     "group[name^='Queue Environment: Conda'], "
     "static_text[name^='Conda Packages'], "
@@ -155,22 +156,19 @@ def _build_cinema4d_scene(
 
 
 def _build_launch_env(
-    mock_deadline_farm: dict,
     scene_path: Path,
     plugin_diag_log: Path,
 ) -> dict:
     """Build the environment for the Cinema 4D subprocess.
 
-    Mock farm env vars point AWS clients at our in-process HTTP servers.
-    The shim dir contains a sitecustomize.py that strips the `management.`
-    host prefix botocore injects on every deadline: call.
+    The child inherits this process's environment verbatim, so the submitter
+    dialog talks to the real Deadline Cloud service using the machine's
+    ambient AWS credentials and default deadline config (set up via the
+    Deadline Cloud monitor / `deadline config`). We deliberately do NOT
+    override any AWS endpoint or credential vars.
     """
-    mock_env = mock_deadline_farm["env"]
-    shim_dir = mock_deadline_farm["shim_dir"]
-
     return {
         **os.environ,
-        **mock_env,
         # Point C4D at two plugin dirs: the real submitter plugin checked into
         # this repo, and the test-only sidecar that auto-opens the submitter.
         # C4D loads every .pyp on this path at startup; the sidecar dispatches
@@ -188,15 +186,10 @@ def _build_launch_env(
         ),
         # C4D's bundled Python uses this for extra package resolution.
         # We need the editable submitter source plus the venv site-packages
-        # (PySide6 / qtpy / deadline-client all live there) and the shim
-        # dir so sitecustomize patches botocore on interpreter start.
+        # (PySide6 / qtpy / deadline-client all live there).
         "C4DPYTHONPATH311": _prepend(
-            shim_dir,
-            _prepend(
-                build_submitter_pythonpath(_REPO_ROOT),
-                os.environ.get("C4DPYTHONPATH311", ""),
-                os.pathsep,
-            ),
+            build_submitter_pythonpath(_REPO_ROOT),
+            os.environ.get("C4DPYTHONPATH311", ""),
             os.pathsep,
         ),
         # Where the sidecar plugin writes its diagnostics (read back on
@@ -426,7 +419,7 @@ def _diag_probe_conda_params(dialog, dialog_app) -> None:
     try:
         # The Conda queue env renders its controls under a group labelled
         # "Queue Environment: Conda"; the param labels are "Conda Packages" /
-        # "Conda Channels" (see _CONDA_QUEUE_ENV_TEMPLATE in the mock backend).
+        # "Conda Channels".
         conda_markers = dialog.descendant(
             "*[name^='Queue Environment: Conda'], "
             "*[name^='Conda Packages'], "
@@ -556,9 +549,7 @@ def _drive_submitter_ui(proc: subprocess.Popen, bundle_staging: Path) -> Path:
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
-    # EXPERIMENT: stability gate temporarily disabled to isolate whether mock
-    # response latency ALONE removes the flake. Restore before finalizing.
-    # _wait_for_queue_params_stable(dialog, dialog_app)
+    _wait_for_queue_params_stable(dialog, dialog_app)
     _press_export_bundle(dialog, dialog_app)
 
     # Wait for the bundle to land on disk. This is the source of truth for
@@ -573,7 +564,6 @@ def _drive_submitter_ui(proc: subprocess.Popen, bundle_staging: Path) -> Path:
 def _export_job_bundle_via_submitter(
     cinema4d_location: Path,
     scene_path: Path,
-    mock_deadline_farm: dict,
     job_bundle_generated: Path,
 ) -> None:
     """Launch Cinema 4D, drive the real submitter UI to export a job bundle,
@@ -593,7 +583,7 @@ def _export_job_bundle_via_submitter(
     plugin_diag_log = bundle_staging / "plugin-diag.log"
     log(f"bundle staging dir: {bundle_staging}")
     try:
-        env = _build_launch_env(mock_deadline_farm, scene_path, plugin_diag_log)
+        env = _build_launch_env(scene_path, plugin_diag_log)
         with override_job_history_dir(bundle_staging):
             proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
             try:
@@ -611,7 +601,7 @@ def _export_job_bundle_via_submitter(
 def test_integ(
     cinema4d_location: Path,
     test_scenes_folder_location: Path,
-    mock_deadline_farm: dict,
+    deadline_farm: dict,
     test_name: str,
 ) -> None:
     """
@@ -648,7 +638,6 @@ def test_integ(
     _export_job_bundle_via_submitter(
         cinema4d_location=cinema4d_location,
         scene_path=scene_path,
-        mock_deadline_farm=mock_deadline_farm,
         job_bundle_generated=job_bundle_generated,
     )
 
