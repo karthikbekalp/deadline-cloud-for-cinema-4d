@@ -93,6 +93,42 @@ def _install_management_host_redirect():
         _diag(f"management host redirect install failed: {e!r}")
 
 
+def _suppress_explorer_popup():
+    """Offline-mode only: stop the submitter from opening the bundle folder in
+    File Explorer after an Export.
+
+    deadline-cloud's submitter calls ``os.startfile(bundle_dir)`` on win32 after
+    saving the bundle (submit_job_to_deadline_dialog.py), which pops a File
+    Explorer window. In an automated test that window just lingers and piles up
+    across runs, and closing it afterwards is fiddly (it's a window inside the
+    shared explorer.exe shell, not a process we can kill). Far simpler to stop it
+    opening: replace ``os.startfile`` with a no-op for the duration of the test.
+
+    Gated on ``DEADLINE_CLOUD_MOCK_MODE`` so the shipped behaviour is untouched
+    for real users. ``os.startfile`` only exists on Windows, so this is a no-op
+    (AttributeError-guarded) elsewhere.
+    """
+    if os.environ.get("DEADLINE_CLOUD_MOCK_MODE") != "1":
+        return
+    if not hasattr(os, "startfile"):
+        return  # non-Windows: nothing opens Explorer
+    try:
+        if getattr(os, "_deadline_startfile_suppressed", False):
+            return
+        _orig_startfile = os.startfile
+
+        def _noop_startfile(path, *args, **kwargs):
+            _diag(f"suppressed os.startfile({path!r}) (mock mode; Explorer not opened)")
+
+        os.startfile = _noop_startfile
+        os._deadline_startfile_suppressed = True
+        # Stash the original in case anything wants to restore it.
+        os._deadline_orig_startfile = _orig_startfile
+        _diag("os.startfile suppressed (mock mode; submitter will not open Explorer)")
+    except Exception as e:
+        _diag(f"os.startfile suppression failed: {e!r}")
+
+
 def _install_diag_log_capture():
     """DIAGNOSTIC: surface errors that the submitter dialog swallows.
 
@@ -302,6 +338,8 @@ def PluginMessage(id, data):
         # Must run before the submitter opens so its first API call is already
         # redirected to the loopback mock (no-op unless DEADLINE_CLOUD_MOCK_MODE=1).
         _install_management_host_redirect()
+        # Stop the submitter opening File Explorer on Export (mock mode only).
+        _suppress_explorer_popup()
 
         scene_path = os.environ.get("DEADLINE_CLOUD_SCENE_PATH", "")
         if scene_path:
