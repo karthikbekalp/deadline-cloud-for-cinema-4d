@@ -100,7 +100,8 @@ class MockServerProcess:
 
     def __init__(self, response_delay_s: float = 0.3):
         self._response_delay_s = response_delay_s
-        self._proc: Optional[multiprocessing.Process] = None
+        # spawn context yields a SpawnProcess; BaseProcess is the common base.
+        self._proc: Optional[multiprocessing.process.BaseProcess] = None
         self.base_url: Optional[str] = None
         self.backend: Optional[RemoteBackend] = None
 

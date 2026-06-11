@@ -17,7 +17,6 @@ import PIL.Image
 from deadline.client.config import get_setting, set_setting
 from yaml import dump, safe_load
 
-
 _T0 = time.monotonic()
 
 
@@ -148,8 +147,7 @@ def build_cinema4d_scene(
     # source of truth — same approach as the crowecawcaw e2e driver.
     scene = scene_dir / scene_name
     assert scene.is_file(), (
-        f"scene.py did not save expected file at {scene} "
-        f"(c4dpy exit code {result.returncode})"
+        f"scene.py did not save expected file at {scene} " f"(c4dpy exit code {result.returncode})"
     )
     return scene
 
@@ -171,27 +169,22 @@ def kill_proc(proc: subprocess.Popen) -> None:
         log(f"C4D process pid={proc.pid} killed")
 
 
-def wait_for_bundle(history_dir: Path, timeout_s: float) -> Path:
-    """Return the newest job-history bundle dir under `history_dir`.
-    Bundles live at history_dir/<YYYY-mm>/<bundle-name>/."""
-    log(f"waiting up to {timeout_s:.0f}s for bundle under {history_dir}")
-    deadline_t = time.monotonic() + timeout_s
-    last_log = 0.0
-    while time.monotonic() < deadline_t:
-        candidates = [p for p in history_dir.glob("*/*") if p.is_dir()]
-        if candidates:
-            bundle = max(candidates, key=lambda p: p.stat().st_mtime)
-            log(f"bundle found: {bundle}")
-            return bundle
-        # Log every 5s while polling so we can see we're still alive.
-        now = time.monotonic()
-        if now - last_log >= 5.0:
-            log(f"still waiting for bundle ({now - (deadline_t - timeout_s):.1f}s elapsed)")
-            last_log = now
-        time.sleep(0.5)
-    raise AssertionError(
-        f"No bundle created under {history_dir} within {timeout_s:.0f}s"
-    )
+_BUNDLE_FILES = ("template.yaml", "parameter_values.yaml", "asset_references.yaml")
+
+
+def find_complete_bundle(history_dir: Path) -> Path | None:
+    """Return the newest bundle dir under `history_dir` that holds all of the
+    bundle files, or None if no complete bundle is present.
+
+    Bundles live at history_dir/<YYYY-mm>/<bundle-name>/. The submitter creates
+    the bundle dir empty and then writes the files into it, so we check that all
+    the files are present, not just that the dir exists."""
+    candidates = [p for p in history_dir.glob("*/*") if p.is_dir()]
+    if not candidates:
+        return None
+    bundle = max(candidates, key=lambda p: p.stat().st_mtime)
+    present = {f.name for f in bundle.iterdir() if f.is_file()}
+    return bundle if set(_BUNDLE_FILES).issubset(present) else None
 
 
 @contextlib.contextmanager
@@ -217,9 +210,7 @@ def replace_backslashes(content: str) -> str:
     Replaces backslashes that are path separators.
     Note: This also preserves the backslashes in unicode characters.
     """
-    content = re.sub(
-        r"\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})", r"UNICODE_ESCAPE\1", content
-    )
+    content = re.sub(r"\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})", r"UNICODE_ESCAPE\1", content)
     content = re.sub(r"\\+", "/", content)
     content = content.replace("UNICODE_ESCAPE", "\\")
     return content
@@ -269,7 +260,6 @@ def _normalize_submitter_integration_version(content: str) -> str:
     return content
 
 
-
 def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     expected_job_bundle_dir_path: Path, generated_job_bundle_dir_path: Path
 ) -> None:
@@ -289,9 +279,11 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     # doesn't produce a doubled separator ("Github Repos//deadline-..."). On
     # Windows the doubled separator was masked because replace_backslashes
     # collapses "\\+" to a single "/", but on POSIX the doubled "/" survived.
-    prefix_path = os.path.abspath(expected_job_bundle_dir_path).split(
-        "deadline-cloud-for-cinema-4d"
-    )[0].rstrip("/\\")
+    prefix_path = (
+        os.path.abspath(expected_job_bundle_dir_path)
+        .split("deadline-cloud-for-cinema-4d")[0]
+        .rstrip("/\\")
+    )
 
     # Get list of files in both directories
     expected_job_bundle_files = set(
@@ -370,6 +362,7 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     assert "parameter_values.yaml" in results["identical_files"]
     assert "asset_references.yaml" in results["identical_files"]
 
+
 def _find_actual_image(actual_image_directory: Path, expected_image_name: str) -> Path:
     """Find the actual image, handling underscore-sanitization differences."""
     exact_path = actual_image_directory / expected_image_name
@@ -394,9 +387,9 @@ def assert_all_images_close(expected_image_directory: Path, actual_image_directo
         actual_image_path = _find_actual_image(actual_image_directory, image.name)
         actual = np.asarray(PIL.Image.open(actual_image_path))
         expected = np.asarray(PIL.Image.open(image))
-        assert actual.shape == expected.shape, (
-            f"Image dimensions differ: {actual.shape} vs {expected.shape}"
-        )
+        assert (
+            actual.shape == expected.shape
+        ), f"Image dimensions differ: {actual.shape} vs {expected.shape}"
 
         # Check that the two images are the same within a tolerance.
         # It's normal for there to be noise in an output image, so it is unlikely that two

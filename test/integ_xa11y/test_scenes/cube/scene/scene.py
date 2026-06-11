@@ -7,6 +7,7 @@ The submitter UI integ test calls this once before launching the real
 Cinema 4D GUI, so the launched session opens straight onto a saved
 .c4d (skipping the "save the scene first" prompt in show_submitter()).
 """
+
 import os
 import sys
 

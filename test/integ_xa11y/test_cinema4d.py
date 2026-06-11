@@ -16,10 +16,10 @@ from .utils import (
     assert_openjd_run_with_cinema4d_successful,
     build_cinema4d_scene,
     build_submitter_pythonpath,
+    find_complete_bundle,
     kill_proc,
     log,
     resolve_c4d_exe,
-    wait_for_bundle,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +49,6 @@ _DIALOG_APP_PREFIX = _DIALOG_NAME_PREFIX
 
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
-_BUNDLE_EXPORT_TIMEOUT_S = 60.0
 
 
 def _prepend(new: str, existing: str, sep: str) -> str:
@@ -407,13 +406,13 @@ def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
 
 def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path, screenshot_dest: Path) -> Path:
     """Drive the running submitter dialog via xa11y and return the exported
-    bundle directory once it lands on disk.
+    bundle directory.
 
     Waits for the dialog, lets queue-environment loading settle (the mock
     returns no queue environments, so there are no Conda parameter widgets to
     rebuild and thus no reload race), saves a screenshot of the dialog into
-    `screenshot_dest`, presses Export bundle, then waits for the bundle to
-    appear under `history_dir` before dismissing the success popup.
+    `screenshot_dest`, presses Export bundle, dismisses the success popup, then
+    reads the completed bundle from `history_dir`.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
@@ -422,15 +421,19 @@ def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path, screenshot_de
     _save_dialog_screenshot(dialog, dialog_app, screenshot_dest)
     _press_export_bundle(dialog, dialog_app)
 
-    # Wait for the bundle to land on disk. This is the source of truth for
-    # export success — more reliable than matching the QMessageBox success
-    # popup's AX name across platforms.
-    staged_bundle = wait_for_bundle(history_dir, timeout_s=_BUNDLE_EXPORT_TIMEOUT_S)
-
+    # The submitter writes the bundle files and only then shows the success
+    # popup (on_export_bundle in submit_job_to_deadline_dialog.py), so once the
+    # popup is up the bundle is complete on disk and we can read it directly.
     _dismiss_success_popup()
     # Note: on Windows the submitter would normally open the bundle folder in
     # File Explorer (os.startfile); the sidecar plugin suppresses that in mock
     # mode, so there's no Explorer window to clean up here.
+
+    staged_bundle = find_complete_bundle(history_dir)
+    assert (
+        staged_bundle is not None
+    ), f"success popup shown but no complete bundle found under {history_dir}"
+    log(f"bundle found: {staged_bundle}")
     return staged_bundle
 
 

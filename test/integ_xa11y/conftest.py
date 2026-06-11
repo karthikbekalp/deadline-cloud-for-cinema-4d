@@ -147,6 +147,8 @@ def deadline_farm(tmp_path):
     delay = float(os.environ.get("MOCK_DEADLINE_RESPONSE_DELAY_S", "0.3"))
 
     server = MockServerProcess(response_delay_s=delay).start()
+    # start() has populated these; assert so the types narrow from Optional.
+    assert server.backend is not None and server.base_url is not None
     backend = server.backend
     print(f"mock Deadline backend (separate process) listening at {server.base_url}")
 

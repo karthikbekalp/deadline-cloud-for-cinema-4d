@@ -218,13 +218,13 @@ The test then: waits for the dialog, waits for "Loading Queue Environments" to
 disappear (non-fatal if it times out), waits for the Export button to be visible
 and enabled, and presses it.
 
-### 6. Bundle on disk is the source of truth
+### 6. Reading the exported bundle
 
-After pressing Export, the test waits for a bundle to appear under the staging
-dir (`wait_for_bundle`) rather than trying to match the success popup's
-accessible name — popups surface differently across UIA and AX, so the file on
-disk is the reliable signal. The success popup is dismissed *if* found, but a
-miss is non-fatal.
+The submitter writes the bundle files and only then shows the success popup
+(`on_export_bundle`), so once the popup appears the bundle is complete on disk.
+After pressing Export, the test dismisses the popup, then reads the finished
+bundle with `find_complete_bundle` (newest bundle dir that contains all three
+expected files).
 
 The submitter always writes to `<job_history_dir>/<YYYY-mm>/<bundle-name>/`. The
 `job_history_dir` is set in the temp deadline config the `deadline_farm` fixture
