@@ -371,6 +371,22 @@ for f in template.yaml parameter_values.yaml asset_references.yaml; do
 done
 ```
 
+The submitter sometimes emits `parameter_values.yaml` as single-line JSON rather
+than block YAML. The comparison parses both, so either *passes* — but commit
+block YAML to match the rest of the goldens (and stay diffable). Re-serialize it
+with the same dumper the submitter uses:
+
+```bash
+hatch -e integ-xa11y run python -c "
+import json, yaml
+from deadline.client.job_bundle._yaml import deadline_yaml_dump
+p = 'test/integ_xa11y/test_cases/$case/expected/job_bundle/parameter_values.yaml'
+data = yaml.safe_load(open(p))   # safe_load reads both JSON and YAML
+with open(p, 'w', encoding='utf-8', newline='\n') as f:
+    deadline_yaml_dump(data, f, indent=1)
+"
+```
+
 Whatever a configurator changes is reflected in the captured bundle by
 construction, so re-capture whenever you change `scene.py` or `configure.py`.
 The render PNGs (`expected/renders/`) are captured the same way (copy from the

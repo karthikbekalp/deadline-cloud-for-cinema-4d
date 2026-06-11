@@ -127,6 +127,32 @@ Cases are **registered explicitly** in the `_CASES` list in `test_cinema4d.py`
 including how to write a `configure.py` and capture the golden bundle, are in
 `test/integ_xa11y/README.md`.
 
+#### Finding selectors (harvesting locators for a `configure.py`)
+
+A `configure.py` drives widgets by their accessibility **role + name** (e.g.
+`dialog.descendant("check_box[name='Activate detailed logging']")`). You cannot
+guess these names — and they differ between macOS (AX) and Windows (UIA), so a
+configurator must be verified on both. Harvest the live names with the built-in
+dump mode, which prints both settings tabs' accessibility trees and then stops
+(no Export):
+
+```bash
+# macOS / Linux
+DIALOG_DUMP=1 hatch -e integ-xa11y run pytest --no-cov \
+    test/integ_xa11y/test_cinema4d.py --numprocesses=0 -s -k <case>
+```
+```powershell
+# Windows PowerShell
+$env:DIALOG_DUMP=1; hatch -e integ-xa11y run pytest --no-cov `
+    test/integ_xa11y/test_cinema4d.py --numprocesses=0 -s -k <case>; $env:DIALOG_DUMP=$null
+```
+
+Each line is `<role> "<name>" value="<value>"`. Match on role + name. Gotchas
+that the live tree reveals (and which differ by platform) are documented in
+`submitter_ui.py` — read them before writing a selector. The reusable page-object
+helpers there (`set_priority`, `toggle_checkbox`, `set_spin_button`, …) already
+encode the harvested selectors, so prefer them over raw `descendant(...)` calls.
+
 Runs fully **offline** — no real AWS, no login, no real farm. A hand-rolled mock
 Deadline Cloud backend (`test/integ_xa11y/mock_aws/`) speaks the rest-json
 protocol; the `deadline_farm` fixture starts it and wires the Cinema 4D

@@ -401,6 +401,26 @@ def _dismiss_success_popup() -> None:
     log("success popup not found within 5s (non-fatal, bundle already exported)")
 
 
+def _dump_settings_tabs(dialog) -> None:
+    """Dump each settings tab's accessibility tree (DIALOG_DUMP=1 diagnostic).
+
+    Switches to the Shared and Job-specific tabs and prints each subtree, so a
+    contributor can read the live role + accessible names to build selectors --
+    these differ between macOS AX and Windows UIA, so they must be harvested per
+    platform rather than guessed. See "Finding selectors" in test/AGENTS.md for
+    the one-command workflow."""
+    from . import submitter_ui as ui
+
+    for tab in (ui.TAB_SHARED, ui.TAB_JOB_SPECIFIC):
+        log(f"=== DIALOG_DUMP: {tab} tab (depth 15) ===")
+        try:
+            ui.switch_to_tab(dialog, tab)
+            print(dialog.element().dump(max_depth=15))
+        except Exception as e:
+            log(f"dump of {tab!r} failed: {e!r}")
+        log(f"=== DIALOG_DUMP: end {tab} tab ===")
+
+
 def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
     """Copy the exported bundle files flat into `dest`."""
     log(f"copying bundle files {staged_bundle} -> {dest}")
@@ -433,6 +453,12 @@ def _drive_submitter_ui(
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
+    # Diagnostic harvest: DIALOG_DUMP=1 dumps each settings tab's tree and raises,
+    # so you can capture the live accessibility names (which differ across macOS
+    # AX and Windows UIA) without hand-editing a configurator. Skips Export.
+    if os.environ.get("DIALOG_DUMP") == "1":
+        _dump_settings_tabs(dialog)
+        raise AssertionError("DIALOG_DUMP=1: dumped settings tabs, skipping export")
     if configure is not None:
         log("running per-scene dialog configurator")
         configure(dialog)

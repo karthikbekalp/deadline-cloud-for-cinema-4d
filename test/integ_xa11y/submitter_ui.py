@@ -21,40 +21,38 @@ Prefer the semantic helpers in configurators; reach for primitives for one-offs.
 
 Finding selectors
 ------------------
-You cannot guess accessible names -- harvest them. ``_resolve_dialog_app`` in
-``test_cinema4d.py`` prints the dialog tree on a ``-s`` run, or drop a one-line
-configurator that dumps it::
-
-    def configure(dialog): print(dialog.element().dump(max_depth=12))
-
-Each line is ``<role> "<name>" value="<value>"``; match on role + name with
+You cannot guess accessible names -- harvest them with the ``DIALOG_DUMP=1`` dump
+mode (see "Finding selectors" in test/AGENTS.md). Each dumped line is
+``<role> "<name>" value="<value>"``; match on role + name with
 ``dialog.descendant("<role>[name='<name>']")``.
 
 
 Cross-platform contract
 -----------------------
-Configurators are expected to work on **both** macOS (AX) and Windows (UIA).
-Accessible names can differ between the two backends, so keep selectors
-role+name based and verify on both. The names baked into the semantic helpers
-below were harvested from the live macOS AX tree; if a selector misses on
-Windows, the failure dumps the UIA tree -- use that to widen the selector.
+The helpers below are verified on **both** macOS (AX) and Windows (UIA).
+Accessible roles and names can differ between the two backends, so the selectors
+here are written to match either (and were harvested from the live tree on each
+platform -- see "Finding selectors" in test/AGENTS.md). If you add a selector,
+verify it on both; when one misses, the failure dumps that platform's tree.
 
 
 Gotchas the live tree reveals (and source code hides)
 -----------------------------------------------------
-* **Tabs are ``radio_button``, not ``tab``** -- inside a ``tab_group``. Press one
-  to switch tabs, then act on the now-visible widgets.
+* **The tab control's role differs by backend** -- Windows UIA exposes each tab
+  as ``tab`` (inside a ``tab_group``), macOS AX as ``radio_button``.
+  ``switch_to_tab`` matches either.
 * **Many fields share an accessible name.** Qt's ``QFormLayout`` does not give a
   field its label as its accessible name: on the Shared tab the Priority,
   Maximum-failed-tasks, and Maximum-retries spin boxes all surface as
   ``spin_button "Job Properties"`` (only the Name field is uniquely named). The
-  Job-specific tab's text fields surface with empty names. Disambiguate with
-  ``.nth(n)`` (1-based, tree order) or by scoping to a parent ``group`` first.
+  Job-specific tab's text fields have no usable name (empty on macOS, none on
+  Windows). Disambiguate by role + ``.nth(n)`` (1-based, tree order) or by
+  scoping to a parent ``group`` first.
 * **Spin boxes step, they don't set.** ``set_value`` / ``set_numeric_value`` do
-  not work on these Qt spin boxes (verified on macOS AX -- one raises, the other
-  silently no-ops). ``set_spin_button`` drives them with ``increment()`` /
-  ``decrement()`` and reads the value back. Text fields and checkboxes behave
-  normally (``set_value`` / ``toggle``).
+  not work on these Qt spin boxes (one raises, the other silently no-ops).
+  ``set_spin_button`` drives them with ``increment()`` / ``decrement()`` and
+  reads the value back. Text fields and checkboxes behave normally
+  (``set_value`` / ``toggle``).
 * **Always wait before acting.** Widgets settle asynchronously; the primitives
   ``wait_visible`` first.
 
@@ -102,9 +100,13 @@ def _observe_pause() -> None:
 
 
 def switch_to_tab(dialog: xa11y.Locator, tab_name: str) -> None:
-    """Switch tabs. Tabs are radio_buttons, so press the matching one and give
-    the new tab a moment to populate before touching its widgets."""
-    tab = dialog.descendant(f"radio_button[name='{tab_name}']")
+    """Switch tabs, then give the new tab a moment to populate before touching
+    its widgets.
+
+    The tab control's role differs by accessibility backend: Windows UIA exposes
+    each tab as ``tab`` (inside a ``tab_group``), while macOS AX exposes them as
+    ``radio_button``. Match either."""
+    tab = dialog.descendant(f"tab[name='{tab_name}'], radio_button[name='{tab_name}']")
     tab.wait_visible(timeout=_WIDGET_TIMEOUT_S)
     tab.press()
     time.sleep(0.5)  # let the tab's widgets attach
@@ -132,8 +134,8 @@ def set_spin_button(dialog: xa11y.Locator, name: str, nth: int, target: int) -> 
     `target` by stepping toward it, reading the value back each step.
 
     Spin boxes must be stepped, not set: ``set_value`` / ``set_numeric_value`` do
-    not work on them (verified on macOS AX -- one raises, the other silently
-    no-ops). A single ``increment()`` can occasionally advance more than one, so
+    not work on them (one raises, the other silently no-ops). A single
+    ``increment()`` can occasionally advance more than one, so
     we don't trust a fixed step count -- we read ``.value`` each time and stop on
     the target. The bounded loop just prevents spinning forever on an
     unreachable target (e.g. outside the box's range)."""
@@ -208,8 +210,8 @@ def select_combo(dialog: xa11y.Locator, current_name: str) -> None:
 
 # ==========================================================================
 # Layer 2 -- semantic helpers (named for the setting they change).
-# The .nth() indices below are pinned from the live macOS AX tree; re-dump and
-# re-check them if the submitter's layout changes.
+# The .nth() indices below are pinned from the live dialog tree (verified on
+# macOS and Windows); re-dump and re-check them if the submitter's layout changes.
 # ==========================================================================
 
 
@@ -248,11 +250,16 @@ def override_output_path(dialog: xa11y.Locator, transform) -> str:
 
     `transform` takes the field's current path string and returns the new one
     (so a configurator stays path-agnostic -- it never hard-codes the test's
-    absolute paths). Returns the new path. The override field is the 1st
-    empty-named text field on this tab, immediately after the checkbox."""
+    absolute paths). Returns the new path.
+
+    The override field is the 1st text field on this tab (immediately after the
+    "Override Output Path" checkbox). It is matched by role alone -- the field
+    carries no accessible name on either backend (macOS exposes an empty name,
+    Windows exposes none), and in preorder the tab's unnamed text fields are
+    output-path (1st), multi-pass (2nd), frame-range (3rd)."""
     switch_to_tab(dialog, TAB_JOB_SPECIFIC)
     toggle_checkbox(dialog, "Override Output Path")
-    field = dialog.descendant("text_field[name='']").nth(1)
+    field = dialog.descendant("text_field").nth(1)
     field.wait_visible(timeout=_WIDGET_TIMEOUT_S)
     current = field.element().value or ""
     new_value = transform(current)

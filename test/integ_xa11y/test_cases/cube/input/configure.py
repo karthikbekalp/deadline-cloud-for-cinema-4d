@@ -19,7 +19,7 @@ from test.integ_xa11y import submitter_ui as ui
 def configure(dialog):
     # --- Shared job settings ---
     ui.set_job_name(dialog, "cube_configured")
-    ui.set_priority(dialog, 75)  # default 50
+    ui.set_priority(dialog, 51)  # default 50 (one step; large jumps are slow)
     ui.set_max_failed_tasks(dialog, 10)  # default 20
     ui.set_max_retries(dialog, 3)  # default 5
 
