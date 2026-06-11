@@ -631,9 +631,6 @@ def test_integ(
     assert (
         backend.unmatched_requests == []
     ), f"submitter hit routes the mock doesn't implement: {backend.unmatched_requests}"
-    # GetQueueEnvironment is intentionally NOT expected: the mock returns an
-    # empty queue-environment list (see list_queue_environments), so the
-    # submitter never fetches an env template.
     for op in ("ListFarms", "GetFarm", "GetQueue", "ListQueueEnvironments"):
         assert (
             backend.call_counts.get(op, 0) >= 1

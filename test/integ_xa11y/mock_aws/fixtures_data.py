@@ -7,11 +7,10 @@ These values were originally captured from a live Deadline Cloud farm, then
 principal were replaced with obviously-fake placeholders. Only the response
 *shapes* need to be faithful.
 
-Call set for the Export-bundle flow (telemetry opted out, so no STS):
-``ListFarms``, ``GetFarm``, ``GetQueue``, ``ListQueueEnvironments``. The mock
-returns an empty queue-environment list (see ``deadline.py``), so the submitter
-never calls ``GetQueueEnvironment`` and the exported bundle carries no
-``CondaPackages`` / ``CondaChannels``.
+Call set for the Export-bundle flow: ``ListFarms``, ``GetFarm``, ``GetQueue``,
+``ListQueueEnvironments``. The mock returns an empty queue-environment list (see
+``deadline.py``), so the exported bundle carries no ``CondaPackages`` /
+``CondaChannels``.
 """
 
 from __future__ import annotations

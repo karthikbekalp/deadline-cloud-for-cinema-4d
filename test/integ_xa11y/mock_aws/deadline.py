@@ -4,10 +4,8 @@
 
 Scope is grounded on reality: the operation set and response shapes were
 captured by running the real xa11y Export-bundle test against a live farm with
-the API logger in ``AutoOpenSubmitter.pyp`` enabled. With telemetry opted out
-(so no STS) and an empty queue-environment list (so no ``GetQueueEnvironment``),
-the call set is four operations -- ``ListFarms``, ``GetFarm``, ``GetQueue``,
-``ListQueueEnvironments`` -- and that is all this backend implements.
+the API logger in ``AutoOpenSubmitter.pyp`` enabled. The backend implements four
+operations -- ``ListFarms``, ``GetFarm``, ``GetQueue``, ``ListQueueEnvironments``.
 
 Protocol: Deadline Cloud speaks **rest-json**. Routes carry the ``/2023-10-12``
 API prefix; path parameters like ``{farmId}`` are templated into the URI. The
@@ -147,21 +145,16 @@ class MockDeadlineBackend:
         return dict(data.GET_QUEUE_RESPONSE)
 
     @route("GET", "/farms/{farmId}/queues/{queueId}/environments", "ListQueueEnvironments")
-    def list_queue_environments(
-        self, *, farmId: str, queueId: str, nextToken: str | None = None, **kwargs
-    ) -> dict:
+    def list_queue_environments(self, *, farmId: str, queueId: str) -> dict:
         if farmId != self.farm_id or queueId != self.queue_id:
             raise _resource_not_found("queue", queueId, "ListQueueEnvironments")
-        # Deliberately return NO queue environments. With zero envs, the
-        # submitter's queue-parameter load has nothing to build, so
-        # OpenJDParametersWidget.rebuild_ui never recreates QLineEdits, and the
+        # Return an empty queue-environment list. With zero envs, the submitter's
+        # queue-parameter load has nothing to build, so
+        # OpenJDParametersWidget.rebuild_ui never recreates QLineEdits and the
         # reload race (a control deleted out from under an Export press) cannot
-        # occur -- no need for the queue-params-stable timing workaround.
-        #
-        # Trade-off: the exported bundle then carries no CondaPackages /
-        # CondaChannels (those come only from the Conda queue env), so the
-        # expected job bundles omit them too. The submitter never fetches an env
-        # template, so this backend implements no GetQueueEnvironment route.
+        # occur. The exported bundle then carries no CondaPackages / CondaChannels
+        # (those come only from the Conda queue env), so the expected job bundles
+        # omit them too.
         return {"environments": []}
 
 
