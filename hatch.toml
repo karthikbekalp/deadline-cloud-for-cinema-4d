@@ -40,6 +40,17 @@ pre-install-commands = [
 [envs.integ.scripts]
 test = "pytest --no-cov {args:test/integ} -vvv --numprocesses=1"
 
+# xa11y-driven integration test. Drives the real Deadline Cloud submitter
+# dialog end-to-end. Will replace `integ` once we're happy with it.
+[envs.integ-xa11y]
+python = "3.11"
+pre-install-commands = [
+  "pip install -r requirements-testing.txt"
+]
+
+[envs.integ-xa11y.scripts]
+test = "pytest --no-cov {args:test/integ_xa11y} -vvv --numprocesses=1"
+
 [envs.installer.scripts]
 build-installer = "python {root}/scripts/build_installer_cli.py --installer-source-path {root}/installer/DeadlineCloudForCinema4dSubmitter.xml {args:}"
 
