@@ -17,7 +17,7 @@ __pycache__/
 /job_bundle_output_tests/*/scene/tex
 /job_bundle_output_tests/*/*.psd
 /test/integ/**/generated_bundle/*
-/test/integ_xa11y/**/generated_bundle/
+/test/integ_xa11y/**/actual/
 /scripts/dependency_bundle/
 /wheels/
 **/otls/backup

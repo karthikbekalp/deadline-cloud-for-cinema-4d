@@ -92,8 +92,8 @@ def _set_c4d_python_path():
 
 
 @pytest.fixture
-def test_scenes_folder_location() -> Path:
-    return Path(__file__).parent / "test_scenes"
+def test_cases_folder_location() -> Path:
+    return Path(__file__).parent / "test_cases"
 
 
 @pytest.fixture

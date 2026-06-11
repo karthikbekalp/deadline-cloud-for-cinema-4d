@@ -1,4 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+import importlib.util
 import os
 import subprocess
 import sys
@@ -6,9 +7,11 @@ import tempfile
 import time
 from pathlib import Path
 from shutil import copy2, rmtree
+from typing import Callable, Optional
 
 import pytest
 import xa11y
+from yaml import safe_load
 
 from .utils import (
     assert_all_images_close,
@@ -47,6 +50,16 @@ _EXPORT_BUTTON_NAME = "Export bundle"
 
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
+
+# A per-scene hook to drive the submitter dialog (switch tabs, set parameters,
+# toggle options) after it has loaded but before Export bundle is pressed. It
+# receives the dialog locator; use dialog.descendant("role[name='...']") to
+# reach widgets and .set_value()/.press()/.toggle()/.select() to interact. A
+# scene with no configurator exports with the dialog's default settings.
+#
+# Whatever a configurator changes must be reflected in that scene's
+# expected_job_bundle/, since the golden comparison is exact.
+DialogConfigurator = Callable[[xa11y.Locator], None]
 
 
 def _prepend(new: str, existing: str, sep: str) -> str:
@@ -92,39 +105,38 @@ def _dump_plugin_diag_log(log_path: Path) -> None:
     log("--- end sidecar plugin diag log ---")
 
 
-def _prepare_generated_bundle_dir(
-    test_scenes_folder_location: Path, test_name: str
-) -> tuple[Path, Path]:
-    """Resolve the test scene folder and the generated_bundle/ output dir,
-    creating the latter. Returns (test_scene_folder, job_bundle_generated)."""
-    test_scene_folder = test_scenes_folder_location / test_name
-    job_bundle_generated = test_scene_folder / "generated_bundle"
-    os.makedirs(job_bundle_generated, exist_ok=True)
-    return test_scene_folder, job_bundle_generated
+def _prepare_actual_dir(test_cases_folder_location: Path, case: str) -> tuple[Path, Path]:
+    """Resolve the case folder and its (freshly emptied) actual/ output dir.
+
+    Returns (case_folder, actual_dir). actual/ is the runtime working area: the
+    scene is built into it and the exported bundle is copied flat into it, then
+    actual/ is compared against expected/. We rmtree it first so a prior failed
+    run (which leaves actual/ behind for inspection) can't leak stale files into
+    this run."""
+    case_folder = test_cases_folder_location / case
+    actual_dir = case_folder / "actual"
+    rmtree(actual_dir, ignore_errors=True)
+    os.makedirs(actual_dir, exist_ok=True)
+    return case_folder, actual_dir
 
 
 def _build_cinema4d_scene(
     cinema4d_location: Path,
-    test_scene_folder: Path,
-    job_bundle_generated: Path,
-    test_name: str,
+    case_folder: Path,
+    actual_dir: Path,
+    case: str,
 ) -> Path:
-    """Build the parametrized test scene with c4dpy and return the saved
-    scene path. The scene is whichever one lives under test_scene_folder
-    (selected by test_name); its scene/scene.py is run by c4dpy and is
-    expected to save the scene as <test_name>.c4d.
+    """Build the case's scene with c4dpy and return the saved scene path.
 
-    The scene is saved into generated_bundle/ rather than scene/ so that
+    The scene script lives at <case>/input/scene.py and is expected to save the
+    scene as <case>.c4d. It is saved into actual/ (not input/) so that
     render_data RDATA_PATH = "renders/$prj" (resolved against
-    doc.GetDocumentPath()) lands renders inside generated_bundle/renders/,
-    matching the layout assert_all_images_close expects. Same trick the
-    existing test/integ/ test relies on.
+    doc.GetDocumentPath()) lands renders inside actual/renders/ -- where the
+    render comparison looks. Same trick the existing test/integ/ test relies on.
     """
     c4dpy_location = resolve_c4d_exe(cinema4d_location, "c4dpy")
-    test_scene_script = test_scene_folder / "scene" / "scene.py"
-    return build_cinema4d_scene(
-        c4dpy_location, test_scene_script, job_bundle_generated, f"{test_name}.c4d"
-    )
+    scene_script = case_folder / "input" / "scene.py"
+    return build_cinema4d_scene(c4dpy_location, scene_script, actual_dir, f"{case}.c4d")
 
 
 def _build_launch_env(
@@ -398,19 +410,32 @@ def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
             log(f"  copied {src.name}")
 
 
-def _drive_submitter_ui(proc: subprocess.Popen, history_dir: Path, screenshot_dest: Path) -> Path:
+def _drive_submitter_ui(
+    proc: subprocess.Popen,
+    history_dir: Path,
+    screenshot_dest: Path,
+    configure: Optional[DialogConfigurator] = None,
+) -> Path:
     """Drive the running submitter dialog via xa11y and return the exported
     bundle directory.
 
     Waits for the dialog, lets queue-environment loading settle (the mock
     returns no queue environments, so there are no Conda parameter widgets to
-    rebuild and thus no reload race), saves a screenshot of the dialog into
-    `screenshot_dest`, presses Export bundle, dismisses the success popup, then
-    reads the completed bundle from `history_dir`.
+    rebuild and thus no reload race), runs the optional per-scene `configure`
+    hook to adjust the dialog (tabs, parameters), saves a screenshot of the
+    dialog into `screenshot_dest`, presses Export bundle, dismisses the success
+    popup, then reads the completed bundle from `history_dir`.
+
+    `configure` runs after the dialog settles and before the screenshot, so the
+    screenshot captures the exact state that produced the bundle. When it is
+    None the dialog is exported with its default settings.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
+    if configure is not None:
+        log("running per-scene dialog configurator")
+        configure(dialog)
     # Record the fully-loaded dialog state just before Export, for inspection.
     _save_dialog_screenshot(dialog, dialog_app, screenshot_dest)
     _press_export_bundle(dialog, dialog_app)
@@ -436,6 +461,7 @@ def _export_job_bundle_via_submitter(
     scene_path: Path,
     job_bundle_generated: Path,
     deadline_farm: dict,
+    configure: Optional[DialogConfigurator] = None,
 ) -> None:
     """Launch Cinema 4D, drive the real submitter UI to export a job bundle,
     and copy the bundle files flat into `job_bundle_generated`.
@@ -460,7 +486,9 @@ def _export_job_bundle_via_submitter(
         env = _build_launch_env(scene_path, plugin_diag_log, deadline_farm["env_overlay"])
         proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
         try:
-            staged_bundle = _drive_submitter_ui(proc, history_dir, job_bundle_generated)
+            staged_bundle = _drive_submitter_ui(
+                proc, history_dir, job_bundle_generated, configure=configure
+            )
             _copy_bundle_files(staged_bundle, job_bundle_generated)
         finally:
             kill_proc(proc)
@@ -470,12 +498,62 @@ def _export_job_bundle_via_submitter(
         log(f"removed staging dir: {bundle_staging}")
 
 
-@pytest.mark.parametrize("test_name", ["cube"])
+def _load_configurator(case: str) -> Optional[DialogConfigurator]:
+    """Load a case's optional input/configure.py and return its `configure`
+    callable, or None if the case has no configurator.
+
+    A configure.py must define a top-level `configure(dialog)` function. If the
+    file exists but is malformed or missing that function, we raise -- a broken
+    configurator should fail loudly, not be silently skipped."""
+    config_path = Path(__file__).parent / "test_cases" / case / "input" / "configure.py"
+    if not config_path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location(f"_configure_{case}", config_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load configurator at {config_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    configure = getattr(module, "configure", None)
+    if not callable(configure):
+        raise AttributeError(f"{config_path} must define a top-level configure(dialog) function")
+    return configure
+
+
+def _actual_render_dir(actual_dir: Path) -> Path:
+    """Where this run's renders landed, derived from the generated bundle's
+    OutputPath parameter rather than hard-coded.
+
+    The submitter writes the resolved absolute output path into
+    parameter_values.yaml as OutputPath (e.g. .../actual/renders/cube or, if a
+    configurator overrode it, .../actual/render/cube). Reading it back lets a
+    case render wherever its config dictates and the comparison still follows.
+    Falls back to actual/renders if the param is absent."""
+    params_file = actual_dir / "parameter_values.yaml"
+    try:
+        values = safe_load(params_file.read_text(encoding="utf-8"))["parameterValues"]
+        output_path = next(v["value"] for v in values if v["name"] == "OutputPath")
+        # OutputPath points at the render file prefix (.../<dir>/<prj>); its
+        # parent is the directory the PNGs are written into.
+        return Path(output_path).parent
+    except (FileNotFoundError, KeyError, StopIteration):
+        return actual_dir / "renders"
+
+
+# Registered test cases. Each entry is a folder name under test_cases/ with an
+# input/scene.py (required) and an optional input/configure.py (loaded as the
+# dialog configurator). To add a case: create the folder (see test/AGENTS.md)
+# and add its name here.
+_CASES = [
+    "cube",
+]
+
+
+@pytest.mark.parametrize("case", _CASES)
 def test_integ(
     cinema4d_location: Path,
-    test_scenes_folder_location: Path,
+    test_cases_folder_location: Path,
     deadline_farm: dict,
-    test_name: str,
+    case: str,
 ) -> None:
     """
     Performs integration testing for Cinema 4D rendering, driven through
@@ -487,9 +565,15 @@ def test_integ(
     finishes starting, and the openjd run + render compare is skipped on
     macOS (submitter-only coverage there).
 
+    A case is a folder under test_cases/: input/scene.py (required), optional
+    input/configure.py (drives the dialog before Export), and
+    expected/{job_bundle,renders}/ to compare against. The runtime output goes
+    to the case's actual/ dir.
+
     Args:
         cinema4d_location (Path): Path to the Cinema 4D installation directory
-        test_scenes_folder_location (Path): Path to the root directory containing test scenes
+        test_cases_folder_location (Path): Root directory containing test cases
+        case (str): The case folder name under test_cases/ (from _CASES)
 
     Raises:
         AssertionError: If any validation step fails, including:
@@ -497,22 +581,20 @@ def test_integ(
             - Submitter dialog not appearing in the UIA tree
             - Export bundle not producing the expected files
             - openjd check reporting a non-success status
-            - generated bundle differing from expected_job_bundle/
+            - generated bundle differing from expected/job_bundle/
             - openjd run failing for any step
     """
-    test_scene_folder, job_bundle_generated = _prepare_generated_bundle_dir(
-        test_scenes_folder_location, test_name
-    )
+    case_folder, actual_dir = _prepare_actual_dir(test_cases_folder_location, case)
+    configure = _load_configurator(case)
 
-    scene_path = _build_cinema4d_scene(
-        cinema4d_location, test_scene_folder, job_bundle_generated, test_name
-    )
+    scene_path = _build_cinema4d_scene(cinema4d_location, case_folder, actual_dir, case)
 
     _export_job_bundle_via_submitter(
         cinema4d_location=cinema4d_location,
         scene_path=scene_path,
-        job_bundle_generated=job_bundle_generated,
+        job_bundle_generated=actual_dir,
         deadline_farm=deadline_farm,
+        configure=configure,
     )
 
     # The submitter ran against the mock backend, not real AWS. Prove its calls
@@ -531,26 +613,27 @@ def test_integ(
             backend.call_counts.get(op, 0) >= 1
         ), f"expected the submitter to call {op}; saw {dict(backend.call_counts)}"
 
-    assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
+    assert_is_valid_job_bundle(actual_dir / "template.yaml")
 
     assert_expected_job_bundle_and_generated_job_bundle_are_equal(
-        test_scene_folder / "expected_job_bundle", job_bundle_generated
+        case_folder / "expected" / "job_bundle", actual_dir
     )
 
     # Run the bundle via openjd and compare rendered output. This adaptor
     # portion only runs on Windows; on macOS the test is submitter-only (the
     # render path needs Conda-managed cinema4d-openjd, which we don't ship for
-    # darwin yet).
+    # darwin yet). The render dir is derived from the bundle's OutputPath, so a
+    # configurator that overrides the output path is followed automatically.
     if sys.platform != "darwin":
         assert_openjd_run_with_cinema4d_successful(
             cinema4d_location,
-            job_bundle_generated / "template.yaml",
-            job_bundle_generated / "parameter_values.yaml",
+            actual_dir / "template.yaml",
+            actual_dir / "parameter_values.yaml",
         )
         assert_all_images_close(
-            test_scene_folder / "expected_job_output" / "renders",
-            job_bundle_generated / "renders",
+            case_folder / "expected" / "renders",
+            _actual_render_dir(actual_dir),
         )
 
     # Clean up if the test was successful
-    rmtree(job_bundle_generated, ignore_errors=True)
+    rmtree(actual_dir, ignore_errors=True)

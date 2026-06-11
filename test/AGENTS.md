@@ -15,8 +15,9 @@ test/
 │   ├── conftest.py          # Test fixtures
 │   └── utils.py             # Test utilities
 ├── integ_xa11y/             # xa11y-driven submitter test, offline mock backend
-│   ├── test_scenes/         # Test scene definitions (mirrors integ/)
+│   ├── test_cases/          # Self-contained cases: input/ expected/ actual/
 │   ├── test_cinema4d.py     # Drives the real submitter dialog via xa11y
+│   ├── submitter_ui.py      # Page-object for driving the dialog from configure.py
 │   ├── conftest.py          # Fixtures, incl. deadline_farm (starts the mock)
 │   ├── utils.py             # Test utilities
 │   ├── mock_aws/            # Hand-rolled offline mock Deadline Cloud backend
@@ -103,21 +104,35 @@ hatch run integ:test -k "redshift_tiles"
 
 ### xa11y-driven integration test (`test/integ_xa11y/`)
 
-Mirrors the layout and naming of `test/integ/` (`test_cinema4d.py`,
-`test_scenes/<name>/scene/scene.py`, `generated_bundle/`, etc.) but
-drives the **real Deadline Cloud submitter dialog** with
+Drives the **real Deadline Cloud submitter dialog** with
 [xa11y](https://xa11y.dev) instead of calling `internal_create_job_bundle()`
-directly.
-
-Once we're confident in this test, the plan is to delete `test/integ/`
+directly. Once we're confident in this test, the plan is to delete `test/integ/`
 and rename this folder to `test/integ/`.
+
+Each test case is a self-contained folder under `test_cases/<name>/`:
+
+```
+test_cases/<name>/
+├── input/
+│   ├── scene.py        # required — builds <name>.c4d (runs in c4dpy)
+│   └── configure.py    # optional — configure(dialog) drives the dialog before Export
+├── expected/
+│   ├── job_bundle/     # golden bundle files to compare against
+│   └── renders/        # golden render PNGs (Windows-only compare)
+└── actual/             # gitignored — runtime output; kept on failure
+```
+
+Cases are **registered explicitly** in the `_CASES` list in `test_cinema4d.py`
+(adding the folder is not enough — add its name to the list). Full instructions,
+including how to write a `configure.py` and capture the golden bundle, are in
+`test/integ_xa11y/README.md`.
 
 Runs fully **offline** — no real AWS, no login, no real farm. A hand-rolled mock
 Deadline Cloud backend (`test/integ_xa11y/mock_aws/`) speaks the rest-json
 protocol; the `deadline_farm` fixture starts it and wires the Cinema 4D
 subprocess to it. No credentials or `deadline config` are required, and the
 generated bundle carries only sanitized fake farm/queue IDs, so
-`expected_job_bundle/` is NOT farm-specific.
+`expected/job_bundle/` is NOT farm-specific.
 
 The test launches the Cinema 4D GUI binary with two plugin directories on
 `g_additionalModulePath`: the real, unmodified
@@ -127,20 +142,21 @@ The test launches the Cinema 4D GUI binary with two plugin directories on
 submitter via `c4d.CallCommand(SUBMITTER_PLUGIN_ID)` — the same command
 `Extensions > AWS Deadline Cloud Submitter` invokes. Keeping the test hook in
 the sidecar means the shipped plugin stays unmodified and is exercised exactly
-as a customer would. The test then drives the resulting Qt dialog with xa11y,
-clicks `Export bundle`, copies the resulting bundle flat into
-`<scene>/generated_bundle/`, then runs `openjd check` and `openjd run`
-against it — same final assertions as the existing test.
+as a customer would. The test then drives the resulting Qt dialog with xa11y
+(optionally running the case's `configure.py` to change settings), clicks
+`Export bundle`, copies the resulting bundle flat into `<case>/actual/`, then
+runs `openjd check` and `openjd run` against it — same final assertions as the
+existing test.
 
 #### Offline mock architecture
 
 - **Mock backend** (`mock_aws/deadline.py`): an in-memory Deadline Cloud
-  simulator serving only the five operations the Export-bundle flow was observed
-  to call against a real farm — `ListFarms`, `GetFarm`, `GetQueue`,
-  `ListQueueEnvironments`, `GetQueueEnvironment`. It records `call_counts` /
-  `request_log` / `unmatched_requests` so the test can assert exactly which
-  calls reached it and that nothing hit an unmocked route. Seeded from sanitized
-  real response data in `mock_aws/fixtures_data.py`.
+  simulator serving only the four operations the Export-bundle flow calls with
+  an empty queue-environment list — `ListFarms`, `GetFarm`, `GetQueue`,
+  `ListQueueEnvironments` (no `GetQueueEnvironment`, since the env list is
+  empty). It records `call_counts` / `request_log` / `unmatched_requests` so the
+  test can assert exactly which calls reached it and that nothing hit an unmocked
+  route. Seeded from sanitized real response data in `mock_aws/fixtures_data.py`.
 - **Separate process** (`mock_aws/server_process.py`): the mock runs in its own
   process, NOT a thread. xa11y's native `wait_*` calls hold the CPython GIL for
   most of their duration, which would starve an in-process server thread and

@@ -69,13 +69,13 @@ pytest (parent process)
                 ▼
          bundle written to <job_history_dir>/<YYYY-mm>/<bundle-name>/
                 │
-   parent ◀────┘ copies bundle flat into <scene>/generated_bundle/
+   parent ◀────┘ copies bundle flat into <case>/actual/
          │
          ├─ assert the mock saw exactly the expected calls (no unmatched routes)
          ├─ openjd check
-         ├─ compare against expected_job_bundle/ (golden files)
+         ├─ compare against expected/job_bundle/ (golden files)
          ├─ openjd run  (Windows only)
-         └─ compare renders against expected_job_output/ (Windows only)
+         └─ compare renders against expected/renders/ (Windows only)
 ```
 
 ## The files, and what each is responsible for
@@ -90,24 +90,27 @@ pytest (parent process)
 | `mock_aws/wiring.py` | Builds the temp deadline config + subprocess env overlay that point C4D at the mock. |
 | `mock_aws/fixtures_data.py` | Sanitized real response bodies (fake farm/queue IDs) the mock serves. |
 | `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin: auto-opens the real submitter and (in mock mode) applies the getaddrinfo / `os.startfile` patches. Never shipped. |
-| `test_scenes/cube/scene/scene.py` | Builds the one-cube test scene with `c4dpy`. |
-| `test_scenes/cube/expected_job_bundle/` | Golden bundle files to compare against. |
-| `test_scenes/cube/expected_job_output/renders/` | Golden render output to compare against. |
+| `submitter_ui.py` | Page-object for driving the dialog (tabs, fields, checkboxes) from a case's `configure.py`. |
+| `test_cases/cube/input/scene.py` | Builds the one-cube test scene with `c4dpy`. |
+| `test_cases/cube/input/configure.py` | Drives the dialog (changes settings) before Export. |
+| `test_cases/cube/expected/job_bundle/` | Golden bundle files to compare against. |
+| `test_cases/cube/expected/renders/` | Golden render output to compare against. |
 
 ## Walkthrough of the flow
 
-### 1. Build the scene (`build_cinema4d_scene` → `scene.py`)
+### 1. Build the scene (`build_cinema4d_scene` → `input/scene.py`)
 
-`scene.py` runs inside **`c4dpy`** (Cinema 4D's headless Python). It builds a
-cube, sets the render output to `renders/$prj`, single frame, PNG, Standard/
+`input/scene.py` runs inside **`c4dpy`** (Cinema 4D's headless Python). It builds
+a cube, sets the render output to `renders/$prj`, single frame, PNG, Standard/
 Physical renderer, then saves `cube.c4d`.
 
 Two non-obvious details:
 
-- The scene is saved **into `generated_bundle/`**, not `scene/`. Because the
-  render path `renders/$prj` resolves relative to the document's directory,
-  saving the scene there makes renders land in `generated_bundle/renders/` —
-  exactly where `assert_all_images_close` looks.
+- The scene is saved **into `actual/`**, not `input/`. Because the render path
+  `renders/$prj` resolves relative to the document's directory, saving the scene
+  there makes renders land in `actual/renders/` — and the render compare derives
+  its directory from the bundle's `OutputPath` param, so a `configure.py` that
+  overrides the output path is followed automatically.
 - `c4dpy` often exits non-zero during teardown even after the script succeeds,
   so the helper treats **"the .c4d file exists"** as the source of truth, not
   the exit code.
@@ -143,7 +146,7 @@ calls present, no unmatched routes).
 > Because the mock returns fake, sanitized farm/queue IDs and an **empty
 > queue-environment list**, the exported bundle is **not** farm-specific and
 > carries **no** `CondaPackages` / `CondaChannels`. The golden
-> `expected_job_bundle/` files reflect that and need no per-farm regeneration.
+> `expected/job_bundle/` files reflect that and need no per-farm regeneration.
 
 #### Why a separate process (not a thread)
 
@@ -229,8 +232,8 @@ expected files).
 The submitter always writes to `<job_history_dir>/<YYYY-mm>/<bundle-name>/`. The
 `job_history_dir` is set in the temp deadline config the `deadline_farm` fixture
 wrote (read inside the C4D subprocess), so the bundle lands in a dir the test
-controls; the test then copies the bundle files **flat** into
-`generated_bundle/` to match the layout the assertions expect.
+controls; the test then copies the bundle files **flat** into the case's
+`actual/` dir to match the layout the assertions expect.
 
 ### 7. Assertions
 
@@ -246,8 +249,8 @@ controls; the test then copies the bundle files **flat** into
 - macOS stops after bundle comparison — the render path needs Conda-managed
   `cinema4d-openjd`, which isn't shipped for darwin yet.
 
-On success, `generated_bundle/` is removed; on failure it's left behind for
-inspection.
+On success, the case's `actual/` dir is removed; on failure it's left behind for
+inspection (and is gitignored, so it never gets committed).
 
 ### Golden-bundle normalizations
 
@@ -300,14 +303,82 @@ else a scan of known install paths (newest first).
 
 ## Extending the test
 
-- **New scene:** add `test_scenes/<name>/scene/scene.py`, an
-  `expected_job_bundle/`, and `expected_job_output/renders/`, then add `<name>`
-  to the `@parametrize` list in `test_cinema4d.py`. The expected bundle works on
-  every platform and is **not** farm-specific (the mock provides fake, stable
-  farm/queue IDs and no queue environments), so the expected files are portable
-  and don't need per-farm regeneration.
-- **New mocked operation:** if a submitter change makes it call a Deadline
-  operation the mock doesn't implement, the test will fail its
-  `unmatched_requests` assertion (and the mock logs a `404 NO ROUTE`). Add a
-  `@route`-decorated handler in `mock_aws/deadline.py` and, if it returns
-  resource data, seed it in `mock_aws/fixtures_data.py`.
+### Anatomy of a test case
+
+A case is a self-contained folder under `test_cases/<name>/`:
+
+```
+test_cases/<name>/
+├── input/                 # what you author
+│   ├── scene.py           #   required — builds <name>.c4d (runs in c4dpy)
+│   └── configure.py       #   OPTIONAL — configure(dialog) drives the dialog
+│                          #              before Export (runs in pytest + xa11y)
+├── expected/              # what we compare against
+│   ├── job_bundle/        #   golden template/parameter_values/asset_references
+│   └── renders/           #   golden render PNGs (Windows-only compare)
+└── actual/                # gitignored — runtime output; kept on failure
+```
+
+The case is then **registered explicitly** in the `_CASES` list in
+`test_cinema4d.py` — adding the folder is not enough, you add its name to the
+list. The expected bundle works on every platform and is **not** farm-specific
+(the mock provides fake, stable farm/queue IDs and no queue environments), so
+the expected files are portable and don't need per-farm regeneration.
+
+### Add a plain case (no UI interaction)
+
+1. Create `test_cases/<name>/input/scene.py` (model it on `cube`'s).
+2. Add `"<name>"` to the `_CASES` list in `test_cinema4d.py`.
+3. Run it once — it fails the bundle comparison because `expected/` is empty.
+   **Capture the golden** (see below).
+4. Re-run — green.
+
+### Add a configured case (click buttons / change settings before Export)
+
+Same as above, plus an `input/configure.py` defining a top-level
+`configure(dialog)` that drives the dialog via the `submitter_ui` page-object:
+
+```python
+from test.integ_xa11y import submitter_ui as ui
+
+def configure(dialog):
+    ui.set_priority(dialog, 75)
+    ui.set_detailed_logging(dialog, True)
+```
+
+`configure` runs after the dialog settles and before Export, so the screenshot
+captures the configured state. See `submitter_ui.py` for the available helpers
+and the hard-won gotchas (tabs are `radio_button`, spin boxes step rather than
+set, duplicate accessible names need `.nth()`, etc.), and `cube`'s
+`input/configure.py` for a worked example. Configurators are expected to work on
+**both** macOS and Windows; if a selector misses on one, the failure dumps the
+accessibility tree — use that to widen it.
+
+### Capturing the golden bundle (manual)
+
+After a run, the generated bundle is in the case's `actual/`. Copy the three
+files into `expected/job_bundle/` and sanitize the absolute repo prefix — replace
+everything up to (but not including) `deadline-cloud-for-cinema-4d` with
+`PATH_TO_BE_REPLACED`:
+
+```bash
+case=<name>
+parent="$(dirname "$(pwd)")"   # run from the repo root
+for f in template.yaml parameter_values.yaml asset_references.yaml; do
+  perl -pe "s{\Q$parent\E}{PATH_TO_BE_REPLACED}g" \
+    test/integ_xa11y/test_cases/$case/actual/$f \
+    > test/integ_xa11y/test_cases/$case/expected/job_bundle/$f
+done
+```
+
+Whatever a configurator changes is reflected in the captured bundle by
+construction, so re-capture whenever you change `scene.py` or `configure.py`.
+The render PNGs (`expected/renders/`) are captured the same way (copy from the
+run's render dir) and only compared on Windows.
+
+### New mocked operation
+
+If a submitter change makes it call a Deadline operation the mock doesn't
+implement, the test fails its `unmatched_requests` assertion (and the mock logs
+a `404 NO ROUTE`). Add a `@route`-decorated handler in `mock_aws/deadline.py`
+and, if it returns resource data, seed it in `mock_aws/fixtures_data.py`.
