@@ -536,11 +536,8 @@ def test_integ(
 
     assert_is_valid_job_bundle(job_bundle_generated / "template.yaml")
 
-    # Compare against the platform-appropriate expected bundle (the _darwin
-    # variant on macOS).
-    suffix = "_darwin" if sys.platform == "darwin" else ""
     assert_expected_job_bundle_and_generated_job_bundle_are_equal(
-        test_scene_folder / f"expected_job_bundle{suffix}", job_bundle_generated
+        test_scene_folder / "expected_job_bundle", job_bundle_generated
     )
 
     # Run the bundle via openjd and compare rendered output. This adaptor

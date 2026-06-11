@@ -91,7 +91,7 @@ pytest (parent process)
 | `mock_aws/fixtures_data.py` | Sanitized real response bodies (fake farm/queue IDs) the mock serves. |
 | `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin: auto-opens the real submitter and (in mock mode) applies the getaddrinfo / `os.startfile` patches. Never shipped. |
 | `test_scenes/cube/scene/scene.py` | Builds the one-cube test scene with `c4dpy`. |
-| `test_scenes/cube/expected_job_bundle[_darwin]/` | Golden bundle files to compare against. |
+| `test_scenes/cube/expected_job_bundle/` | Golden bundle files to compare against. |
 | `test_scenes/cube/expected_job_output/renders/` | Golden render output to compare against. |
 
 ## Walkthrough of the flow
@@ -305,11 +305,11 @@ else a scan of known install paths (newest first).
 ## Extending the test
 
 - **New scene:** add `test_scenes/<name>/scene/scene.py`, an
-  `expected_job_bundle/` (and `_darwin` variant if needed), and
-  `expected_job_output/renders/`, then add `<name>` to the `@parametrize` list
-  in `test_cinema4d.py`. The bundle is **not** farm-specific (the mock provides
-  fake, stable farm/queue IDs and no queue environments), so the expected files
-  are portable and don't need per-farm regeneration.
+  `expected_job_bundle/`, and `expected_job_output/renders/`, then add `<name>`
+  to the `@parametrize` list in `test_cinema4d.py`. The expected bundle works on
+  every platform and is **not** farm-specific (the mock provides fake, stable
+  farm/queue IDs and no queue environments), so the expected files are portable
+  and don't need per-farm regeneration.
 - **New mocked operation:** if a submitter change makes it call a Deadline
   operation the mock doesn't implement, the test will fail its
   `unmatched_requests` assertion (and the mock logs a `404 NO ROUTE`). Add a
