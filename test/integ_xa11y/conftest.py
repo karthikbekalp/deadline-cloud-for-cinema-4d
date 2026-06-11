@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .mock_aws.server_process import MockServerProcess
 from .mock_aws.wiring import build_mock_env, write_deadline_config
+from .utils import c4d_extra_python_paths
 
 # Default install paths per version and platform.
 # Order matters: when scanning for an installed C4D without C4D_LOCATION /
@@ -72,18 +73,10 @@ def cinema4d_location() -> Path:
 @pytest.fixture(autouse=True)
 def _set_c4d_python_path():
     """Set C4DPYTHONPATH311 so c4dpy can find packages installed in the hatch venv."""
-    # Include the project src/ dir (for editable install) and site-packages (for dependencies like PySide6)
-    project_src = str(Path(__file__).parent.parent.parent / "src")
-    site_pkgs = site.getsitepackages()
-    # pywin32's win32file.pyd lives in site-packages/win32/ which c4dpy can't find
-    # via .pth files, so add it explicitly
-    win32_paths: list[str] = []
-    for p in site_pkgs:
-        for subdir in ["win32", "win32/lib"]:
-            d = Path(p) / subdir
-            if d.exists():
-                win32_paths.append(str(d))
-    all_paths = [project_src] + site_pkgs + win32_paths
+    # Same path recipe (src + site-packages + win32 subdirs) the GUI launch env
+    # uses; shared via c4d_extra_python_paths so the two stay in lockstep.
+    repo_root = Path(__file__).parent.parent.parent
+    all_paths = c4d_extra_python_paths(repo_root)
     existing = os.environ.get("C4DPYTHONPATH311", "")
     new_paths = os.pathsep.join(p for p in all_paths if p and p not in existing)
     os.environ["C4DPYTHONPATH311"] = f"{new_paths}{os.pathsep}{existing}" if existing else new_paths
@@ -91,7 +84,7 @@ def _set_c4d_python_path():
 
     # pywin32 DLLs (pywintypes311.dll, pythoncom311.dll) live in site-packages/pywin32_system32/
     # and must be on PATH for win32file.pyd to load
-    for p in site_pkgs:
+    for p in site.getsitepackages():
         pywin32_sys = Path(p) / "pywin32_system32"
         if pywin32_sys.exists():
             os.environ["PATH"] = str(pywin32_sys) + os.pathsep + os.environ.get("PATH", "")

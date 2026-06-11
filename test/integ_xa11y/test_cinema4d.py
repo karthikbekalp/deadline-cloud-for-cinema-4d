@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from shutil import copy2, rmtree
 
@@ -38,12 +39,11 @@ _AUTO_OPEN_PLUGIN_DIR = Path(__file__).parent / "fixtures" / "auto_open_submitte
 #
 # Export button: deadline-cloud/src/deadline/client/ui/dialogs/
 #                    submit_job_to_deadline_dialog.py:250
+# Both the UIA App hosting the dialog and the dialog window itself surface this
+# same name (the QApplication display name + version), so it serves as the
+# prefix for matching either one.
 _DIALOG_NAME_PREFIX = "Deadline Cloud Cinema4D Submitter"
 _EXPORT_BUTTON_NAME = "Export bundle"
-# Both the UIA App for the dialog and the dialog window itself surface
-# the same name (the QApplication display name + version), so we reuse
-# the same prefix for both.
-_DIALOG_APP_PREFIX = _DIALOG_NAME_PREFIX
 
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
@@ -67,17 +67,15 @@ def _wait_for_dialog_app(pid: int, name_prefix: str, timeout_s: float):
     even though they share a process — so we have to enumerate apps and
     pick the right one rather than going through the C4D app handle.
     """
-    import time as _t
-
-    deadline_t = _t.monotonic() + timeout_s
-    while _t.monotonic() < deadline_t:
+    deadline_t = time.monotonic() + timeout_s
+    while time.monotonic() < deadline_t:
         try:
             for a in xa11y.App.list():
                 if a.pid == pid and a.name and a.name.startswith(name_prefix):
                     return a
         except Exception as e:
             log(f"App.list() raised while polling: {e!r}")
-        _t.sleep(0.5)
+        time.sleep(0.5)
     return None
 
 
@@ -234,14 +232,14 @@ def _resolve_dialog_app(proc: subprocess.Popen):
     if sys.platform == "win32":
         dialog_app = _wait_for_dialog_app(
             pid=proc.pid,
-            name_prefix=_DIALOG_APP_PREFIX,
+            name_prefix=_DIALOG_NAME_PREFIX,
             timeout_s=_DIALOG_VISIBLE_TIMEOUT_S,
         )
         if dialog_app is None:
             _dump_dialog_discovery_failure(app)
             raise AssertionError(
                 "Submitter dialog did not register with UIA "
-                f"(expected app name prefix {_DIALOG_APP_PREFIX!r})"
+                f"(expected app name prefix {_DIALOG_NAME_PREFIX!r})"
             )
         log(f"submitter dialog UIA app: {dialog_app.name!r}")
     else:
@@ -368,11 +366,9 @@ def _dismiss_success_popup() -> None:
     wait_visible that previously always timed out and left the popup up) makes
     this dismiss within a fraction of a second once the popup appears.
     """
-    import time as _t
-
     log("dismissing success popup ('Saved the submission as a job bundle')")
-    deadline_t = _t.monotonic() + 5.0
-    while _t.monotonic() < deadline_t:
+    deadline_t = time.monotonic() + 5.0
+    while time.monotonic() < deadline_t:
         try:
             for app in xa11y.App.list():
                 ok = app.locator(
@@ -389,7 +385,7 @@ def _dismiss_success_popup() -> None:
                     return
         except Exception as e:
             log(f"success-popup scan raised (retrying): {e!r}")
-        _t.sleep(0.25)
+        time.sleep(0.25)
     log("success popup not found within 5s (non-fatal, bundle already exported)")
 
 

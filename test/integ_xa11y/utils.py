@@ -103,10 +103,17 @@ def resolve_c4d_exe(cinema4d_location: Path, name: str) -> Path:
     return exe
 
 
-def build_submitter_pythonpath(repo_root: Path) -> str:
-    """Same recipe as test/integ/conftest.py:_set_c4d_python_path —
-    point C4DPYTHONPATH<py> at the editable submitter source plus the
-    venv's site-packages so PySide6 / qtpy / deadline-client resolve."""
+def c4d_extra_python_paths(repo_root: Path) -> list[str]:
+    """The extra paths c4dpy / the C4D GUI need on C4DPYTHONPATH<py> to resolve
+    the editable submitter source plus the venv's site-packages (PySide6 / qtpy /
+    deadline-client all live there): the project ``src/`` dir, every
+    site-packages dir, and -- on Windows -- the pywin32 ``win32`` / ``win32/lib``
+    subdirs (whose ``win32file.pyd`` c4dpy can't find via .pth files).
+
+    Returned de-duplicated, order preserved (src first). Both the c4dpy scene
+    build (``conftest._set_c4d_python_path``) and the GUI launch env
+    (``build_submitter_pythonpath``) build on this single recipe.
+    """
     parts: list[str] = [str(repo_root / "src")]
     parts.extend(site.getsitepackages())
     if sys.platform == "win32":
@@ -121,7 +128,12 @@ def build_submitter_pythonpath(repo_root: Path) -> str:
         if p and p not in seen:
             seen.add(p)
             out.append(p)
-    return os.pathsep.join(out)
+    return out
+
+
+def build_submitter_pythonpath(repo_root: Path) -> str:
+    """The C4DPYTHONPATH<py> value (os.pathsep-joined) for the C4D GUI launch."""
+    return os.pathsep.join(c4d_extra_python_paths(repo_root))
 
 
 def build_cinema4d_scene(
