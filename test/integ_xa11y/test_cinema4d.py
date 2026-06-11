@@ -24,13 +24,11 @@ from .utils import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REAL_PLUGIN_DIR = _REPO_ROOT / "deadline_cloud_extension"
-_REAL_PLUGIN_FILE = _REAL_PLUGIN_DIR / "DeadlineCloud.pyp"
 
 # Test-only sidecar plugin loaded alongside the real plugin (see its docstring).
 # Its presence on g_additionalModulePath is what auto-opens the submitter; the
 # shipped DeadlineCloud.pyp carries no test hook of its own.
 _AUTO_OPEN_PLUGIN_DIR = Path(__file__).parent / "fixtures" / "auto_open_submitter"
-_AUTO_OPEN_PLUGIN_FILE = _AUTO_OPEN_PLUGIN_DIR / "AutoOpenSubmitter.pyp"
 
 # Selector strings pinned by inspecting the live UIA tree at runtime
 # (see commit history for tree dumps). UIA on Windows surfaces the Qt

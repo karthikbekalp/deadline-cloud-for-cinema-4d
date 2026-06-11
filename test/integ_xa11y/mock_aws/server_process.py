@@ -59,9 +59,9 @@ class RemoteBackend:
     """Test-side view of the out-of-process backend.
 
     Exposes the same attributes the in-process backend did -- ``farm_id``,
-    ``queue_id``, ``conda_queue_env_id``, ``call_counts``, ``request_log``,
-    ``unmatched_requests`` -- but the observability fields are fetched live from
-    the server's admin endpoint each time they're read.
+    ``queue_id``, ``call_counts``, ``request_log``, ``unmatched_requests`` --
+    but the observability fields are fetched live from the server's admin
+    endpoint each time they're read.
     """
 
     def __init__(self, base_url: str):
@@ -70,7 +70,6 @@ class RemoteBackend:
         # matching deadline config without round-tripping to the server.
         self.farm_id = data.FARM_ID
         self.queue_id = data.QUEUE_ID
-        self.conda_queue_env_id = data.CONDA_QUEUE_ENV_ID
 
     def _fetch(self) -> dict:
         url = f"{self.base_url}{_ADMIN_CALLS_PATH}"

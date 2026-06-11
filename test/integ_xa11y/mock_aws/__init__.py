@@ -15,7 +15,8 @@ only AWS service we mock is Deadline Cloud itself.
 
 The Deadline backend speaks the rest-json protocol the real ``deadline`` client
 expects, implementing just the operations the Export-bundle dialog calls. It
-binds to ``127.0.0.1`` on an ephemeral port and runs in a daemon thread.
+binds to ``127.0.0.1`` on an ephemeral port and runs in a separate process (see
+``server_process.py`` for why a process rather than a thread).
 """
 
 from .deadline import MockDeadlineBackend, start_server

@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 import numpy as np
 import PIL.Image
-from deadline.client.config import get_setting, set_setting
 from yaml import dump, safe_load
 
 _T0 = time.monotonic()
@@ -185,19 +184,6 @@ def find_complete_bundle(history_dir: Path) -> Path | None:
     bundle = max(candidates, key=lambda p: p.stat().st_mtime)
     present = {f.name for f in bundle.iterdir() if f.is_file()}
     return bundle if set(_BUNDLE_FILES).issubset(present) else None
-
-
-@contextlib.contextmanager
-def override_job_history_dir(path: Path):
-    """The submitter exports to settings.job_history_dir (a persistent
-    deadline-client config setting). Override it for the duration of
-    the test and restore the user's prior value on the way out."""
-    previous = get_setting("settings.job_history_dir")
-    set_setting("settings.job_history_dir", str(path))
-    try:
-        yield
-    finally:
-        set_setting("settings.job_history_dir", previous)
 
 
 # Below: identical golden-bundle and image comparison helpers as in

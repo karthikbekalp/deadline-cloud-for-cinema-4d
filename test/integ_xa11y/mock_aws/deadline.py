@@ -2,12 +2,12 @@
 
 """A minimal, observable in-process mock of the Deadline Cloud service.
 
-Scope is grounded on reality: the operation set, response shapes, and the Conda
-queue-environment template were captured by running the real xa11y Export-bundle
-test against a live farm with the API logger in ``AutoOpenSubmitter.pyp``
-enabled. The observed call set (telemetry opted out, so no STS) is exactly five
-operations -- ``ListFarms``, ``GetFarm``, ``GetQueue``, ``ListQueueEnvironments``,
-``GetQueueEnvironment`` -- and that is all this backend implements.
+Scope is grounded on reality: the operation set and response shapes were
+captured by running the real xa11y Export-bundle test against a live farm with
+the API logger in ``AutoOpenSubmitter.pyp`` enabled. With telemetry opted out
+(so no STS) and an empty queue-environment list (so no ``GetQueueEnvironment``),
+the call set is four operations -- ``ListFarms``, ``GetFarm``, ``GetQueue``,
+``ListQueueEnvironments`` -- and that is all this backend implements.
 
 Protocol: Deadline Cloud speaks **rest-json**. Routes carry the ``/2023-10-12``
 API prefix; path parameters like ``{farmId}`` are templated into the URI. The
@@ -96,18 +96,14 @@ class MockDeadlineBackend:
     test can write a matching deadline config for the C4D subprocess.
 
     ``response_delay_s`` adds an artificial per-response delay (default 0.3s) to
-    approximate the real farm's observed 200-600ms latencies. This matters for
-    faithfulness, not just realism: the submitter reloads queue environments
-    several times right after the dialog opens, and the test's Export press has
-    to wait for those reloads to settle. An instant mock would collapse that
-    timing and could mask -- or spuriously trigger -- the reload race the test
-    guards against. Set to 0 to disable.
+    approximate the real farm's observed 200-600ms latencies, so the dialog's
+    open-time loading behaviour resembles a real session rather than resolving
+    instantly. Set to 0 to disable.
     """
 
     def __init__(self, response_delay_s: float = 0.3) -> None:
         self.farm_id = data.FARM_ID
         self.queue_id = data.QUEUE_ID
-        self.conda_queue_env_id = data.CONDA_QUEUE_ENV_ID
         self.response_delay_s = response_delay_s
 
         # --- Observability state ---
@@ -121,12 +117,6 @@ class MockDeadlineBackend:
 
         self._validator: Optional[ParamValidator] = None
         self._service_model: Optional[ServiceModel] = None
-
-    def clear(self) -> None:
-        """Reset observability state so one server can be reused across tests."""
-        self.call_counts.clear()
-        self.request_log.clear()
-        self.unmatched_requests.clear()
 
     def _log(self, msg: str) -> None:
         if self.log_callback is not None:
@@ -170,23 +160,9 @@ class MockDeadlineBackend:
         #
         # Trade-off: the exported bundle then carries no CondaPackages /
         # CondaChannels (those come only from the Conda queue env), so the
-        # expected job bundles omit them too. GetQueueEnvironment is therefore
-        # never called.
+        # expected job bundles omit them too. The submitter never fetches an env
+        # template, so this backend implements no GetQueueEnvironment route.
         return {"environments": []}
-
-    @route(
-        "GET",
-        "/farms/{farmId}/queues/{queueId}/environments/{queueEnvironmentId}",
-        "GetQueueEnvironment",
-    )
-    def get_queue_environment(self, *, farmId: str, queueId: str, queueEnvironmentId: str) -> dict:
-        if (
-            farmId != self.farm_id
-            or queueId != self.queue_id
-            or queueEnvironmentId != self.conda_queue_env_id
-        ):
-            raise _resource_not_found("queueEnvironment", queueEnvironmentId, "GetQueueEnvironment")
-        return dict(data.GET_CONDA_QUEUE_ENV_RESPONSE)
 
 
 # ========================= HTTP server =========================

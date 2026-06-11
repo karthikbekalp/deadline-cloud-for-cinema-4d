@@ -259,10 +259,6 @@ normalizes a fixed set of moving parts:
 - `SubmitterIntegrationVersion` (changes every build) → a fixed placeholder.
 - `jobEnvironments` is stripped from `template.yaml` before comparison.
 
-(A Conda-package-version normalization also exists but is now a no-op: the mock
-returns no queue environments, so the bundle carries no `CondaPackages` /
-`CondaChannels` to normalize.)
-
 The final assertion requires exactly the three expected files
 (`template.yaml`, `parameter_values.yaml`, `asset_references.yaml`) to match.
 

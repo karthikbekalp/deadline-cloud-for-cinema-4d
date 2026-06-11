@@ -91,7 +91,7 @@ test/integ/test_scenes/<scene_name>/
 2. Add a `scene/scene.py` script that generates the test scene programmatically
 3. Add `expected_job_bundle/` with the expected template, parameter values, and asset references
 4. Add `expected_job_output/` with expected render output files
-5. The parametrized test runner (`test_cinema4d.py`) will automatically pick up the new scene
+5. Add `<scene_name>` to the `@pytest.mark.parametrize("test_name", [...])` list in `test_cinema4d.py` so the runner picks it up
 
 ### Running specific integration tests
 
