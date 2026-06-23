@@ -1,15 +1,12 @@
-name: "Cinema 4D Integration Tests (Fork Pilot - Mac)"
+name: "Integ Tests - macOS"
 
 on:
-  workflow_dispatch: {}
-  push:
-    branches:
-      - ci-pilot
+  workflow_call: {}
 
 jobs:
-  IntegrationTestsPilotMac:
+  IntegMacOS:
     if: github.repository == 'karthikbekalp/deadline-cloud-for-cinema-4d'
-    name: Integration Tests (Fork Pilot - Mac)
+    name: Integration Tests (macOS)
     runs-on: macos-latest
     timeout-minutes: 60
     permissions:
@@ -43,7 +40,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
           mask-aws-account-id: true
 
-      - name: Grant accessibility TCC permission
+      - name: Grant accessibility
         run: |
           HATCH_PYTHON=$(hatch -e integ-xa11y run python -c "import os,sys; print(os.path.realpath(sys.executable))")
           SETUP_PYTHON=$(python3 -c "import os,sys; print(os.path.realpath(sys.executable))")
@@ -74,13 +71,6 @@ jobs:
           sudo launchctl stop com.apple.tccd 2>/dev/null || true
           sleep 2
 
-
-
-      - name: Install SSM plugin
-        run: |
-          curl -s "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/session-manager-plugin.pkg" -o "$RUNNER_TEMP/ssm-plugin.pkg"
-          sudo installer -pkg "$RUNNER_TEMP/ssm-plugin.pkg" -target /
-
       - name: Bring up license tunnel and run tests
         env:
           LICENSE_RELAY_INSTANCE: ${{ secrets.LICENSE_RELAY_INSTANCE }}
@@ -89,26 +79,23 @@ jobs:
           rlmPort=$(echo "$RLM_PORT" | tr -d '[:space:]')
           instance=$(echo "$LICENSE_RELAY_INSTANCE" | tr -d '[:space:]')
 
-          # Start SSM port forwarding in background
+          # Install SSM plugin
+          curl -s "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/session-manager-plugin.pkg" -o "$RUNNER_TEMP/ssm-plugin.pkg"
+          sudo installer -pkg "$RUNNER_TEMP/ssm-plugin.pkg" -target /
+
+          # Start SSM port forwarding
           aws ssm start-session \
             --target "$instance" \
             --document-name AWS-StartPortForwardingSession \
             --parameters "{\"portNumber\":[\"$rlmPort\"],\"localPortNumber\":[\"$rlmPort\"]}" &
-          SSM_PID=$!
 
-          # Wait for the local port to become available (retry up to 30s)
+          # Wait for port (retry up to 30s)
           ready=false
           for i in $(seq 1 6); do
             sleep 5
-            if nc -z 127.0.0.1 "$rlmPort" 2>/dev/null; then
-              ready=true
-              break
-            fi
+            if nc -z 127.0.0.1 "$rlmPort" 2>/dev/null; then ready=true; break; fi
           done
-          if [ "$ready" != "true" ]; then
-            echo "ERROR: SSM port forward not up on 127.0.0.1:$rlmPort after 30s"
-            exit 1
-          fi
+          if [ "$ready" != "true" ]; then echo "ERROR: SSM port forward not up after 30s"; exit 1; fi
           echo "License tunnel up via SSM"
 
           hatch run integ-xa11y:test
