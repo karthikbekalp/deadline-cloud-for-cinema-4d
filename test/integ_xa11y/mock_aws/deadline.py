@@ -40,7 +40,7 @@ import threading as _threading
 import time as _time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler as _BaseHTTPRequestHandler
-from http.server import HTTPServer as _HTTPServer
+from http.server import ThreadingHTTPServer as _ThreadingHTTPServer
 from typing import Callable, Optional
 from urllib.parse import parse_qs as _parse_qs
 from urllib.parse import urlparse as _urlparse
@@ -364,7 +364,7 @@ def start_server(backend: MockDeadlineBackend, port: int = 0):
     routes = _discover_routes(backend)
     validator = _ResponseValidator()
     handler_cls = _make_handler(routes, validator, backend)
-    server = _HTTPServer(("127.0.0.1", port), handler_cls)
+    server = _ThreadingHTTPServer(("127.0.0.1", port), handler_cls)
     actual_port = server.server_address[1]
     thread = _threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

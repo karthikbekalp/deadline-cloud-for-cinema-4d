@@ -75,44 +75,6 @@ jobs:
           sleep 2
 
 
-      - name: Prove multiprocessing bug and fix
-        run: |
-          echo "=== Test 1: multiprocessing.spawn INSIDE xdist worker (should FAIL) ==="
-          # This reproduces the exact failure: xdist worker -> multiprocessing.spawn -> child can't re-import <stdin>
-          hatch -e integ-xa11y run pytest --no-cov -vvv --numprocesses=1 --override-ini="addopts=" -k "NONEXISTENT_JUST_SETUP" test/integ_xa11y 2>&1 | tail -5 || true
-
-          # Minimal reproduction: simulate what xdist does (run code from stdin) then try spawn
-          echo "=== Test 2: spawn from stdin-based __main__ (reproduces the bug) ==="
-          hatch -e integ-xa11y run python -c "
-          import multiprocessing, sys, queue as Q
-          def child(q):
-              q.put('hello')
-          ctx = multiprocessing.get_context('spawn')
-          q = ctx.Queue()
-          p = ctx.Process(target=child, args=(q,), daemon=True)
-          p.start()
-          try:
-              msg = q.get(timeout=5)
-              print('UNEXPECTED SUCCESS: ' + msg)
-          except:
-              print('CONFIRMED BUG: spawn from stdin fails (child cannot re-import <stdin>)')
-              if p.is_alive():
-                  p.terminate()
-          " 2>&1 | grep -E "CONFIRMED|UNEXPECTED|Error" || true
-
-          echo ""
-          echo "=== Test 3: spawn WITHOUT xdist (the fix - should SUCCEED) ==="
-          # Run the mock server startup directly without xdist — proves the fix works
-          hatch -e integ-xa11y run python -c "
-          import sys, os
-          sys.path.insert(0, 'test/integ_xa11y')
-          os.environ.setdefault('MULTIPROCESSING_START_METHOD', 'spawn')
-          from mock_aws.server_process import MockServerProcess
-          server = MockServerProcess(response_delay_s=0.1)
-          server.start()
-          print('FIX CONFIRMED: MockServerProcess started at ' + server.base_url)
-          server.stop()
-          " 2>&1 | grep -E "FIX CONFIRMED|Error|Traceback" || true
 
       - name: Install SSM plugin
         run: |
