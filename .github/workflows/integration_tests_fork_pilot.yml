@@ -1,0 +1,91 @@
+name: "Cinema 4D Integration Tests (Fork Pilot)"
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - ci-pilot
+
+jobs:
+  IntegrationTestsPilot:
+    if: github.repository == 'karthikbekalp/deadline-cloud-for-cinema-4d'
+    name: Integration Tests (Fork Pilot)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      LICENSE_ENDPOINT_DNS: "127.0.0.1"
+      C4D_LICENSE_PORT: ${{ secrets.RLM_PORT }}
+      redshift_LICENSE: "${{ secrets.RLM_PORT }}@127.0.0.1"
+      g_licenseServerRLM: "127.0.0.1:${{ secrets.RLM_PORT }}"
+      g_licenseModel: "LICENSEMODEL::RLM"
+      C4D_VERSION: "2026"
+      INSTALLER_BUCKET: ${{ secrets.INSTALLER_BUCKET }}
+      INSTALLER_BUCKET_EXPECTED_OWNER: ${{ secrets.INSTALLER_BUCKET_EXPECTED_OWNER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install hatch
+        shell: pwsh
+        run: pip install --upgrade hatch
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PILOT_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Install and configure Cinema 4D
+        shell: pwsh
+        run: |
+          pip install boto3
+          python ./pipeline/setup-runner.py --versions $env:C4D_VERSION
+
+      - name: Bring up license tunnel and run tests
+        shell: pwsh
+        env:
+          LICENSE_RELAY_INSTANCE: ${{ secrets.LICENSE_RELAY_INSTANCE }}
+          RLM_PORT: ${{ secrets.RLM_PORT }}
+        run: |
+          $rlmPort = $env:RLM_PORT.Trim()
+          $instance = $env:LICENSE_RELAY_INSTANCE.Trim()
+
+          # Install SSM plugin
+          $ssmUrl = "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe"
+          Invoke-WebRequest -Uri $ssmUrl -OutFile "$env:RUNNER_TEMP\ssm-plugin.exe" -UseBasicParsing
+          Start-Process -FilePath "$env:RUNNER_TEMP\ssm-plugin.exe" -ArgumentList "/quiet" -Wait
+
+          # Start SSM port forwarding in background
+          $paramsFile = Join-Path $env:RUNNER_TEMP "ssm_params.json"
+          @{portNumber=@($rlmPort);localPortNumber=@($rlmPort)} | ConvertTo-Json -Compress | Out-File -FilePath $paramsFile -Encoding ascii
+          Start-Process -FilePath "aws" -ArgumentList "ssm start-session --target $instance --document-name AWS-StartPortForwardingSession --parameters file://$paramsFile" -NoNewWindow
+
+          # Wait for the local port to become available (retry up to 30s)
+          $ready = $false
+          for ($i = 0; $i -lt 6; $i++) {
+            Start-Sleep -Seconds 5
+            $t = Test-NetConnection -ComputerName 127.0.0.1 -Port $rlmPort -WarningAction SilentlyContinue
+            if ($t.TcpTestSucceeded) { $ready = $true; break }
+          }
+          if (-not $ready) {
+            Write-Error "SSM port forward not up on 127.0.0.1:$rlmPort after 30s"
+            exit 1
+          }
+          Write-Host "License tunnel up via SSM"
+
+          hatch run integ-xa11y:test
+
+      - name: Tear down
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name "session-manager-plugin" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue

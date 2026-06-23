@@ -1,0 +1,149 @@
+name: "Cinema 4D Integration Tests (Fork Pilot - Mac)"
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - ci-pilot
+
+jobs:
+  IntegrationTestsPilotMac:
+    if: github.repository == 'karthikbekalp/deadline-cloud-for-cinema-4d'
+    name: Integration Tests (Fork Pilot - Mac)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      LICENSE_ENDPOINT_DNS: "127.0.0.1"
+      C4D_LICENSE_PORT: ${{ secrets.RLM_PORT }}
+      redshift_LICENSE: "${{ secrets.RLM_PORT }}@127.0.0.1"
+      g_licenseServerRLM: "127.0.0.1:${{ secrets.RLM_PORT }}"
+      g_licenseModel: "LICENSEMODEL::RLM"
+      C4D_VERSION: "2026"
+      INSTALLER_BUCKET: ${{ secrets.INSTALLER_BUCKET }}
+      INSTALLER_BUCKET_EXPECTED_OWNER: ${{ secrets.INSTALLER_BUCKET_EXPECTED_OWNER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install hatch
+        run: pip install --upgrade hatch
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PILOT_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Grant accessibility TCC permission
+        run: |
+          HATCH_PYTHON=$(hatch -e integ-xa11y run python -c "import os,sys; print(os.path.realpath(sys.executable))")
+          SETUP_PYTHON=$(python3 -c "import os,sys; print(os.path.realpath(sys.executable))")
+          for BIN_PATH in "$SETUP_PYTHON" "$HATCH_PYTHON"; do
+            sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+              "INSERT OR REPLACE INTO access(service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified) \
+              VALUES('kTCCServiceAccessibility','${BIN_PATH}',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s));"
+          done
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 2
+
+      - name: Install and configure Cinema 4D
+        run: |
+          pip install boto3
+          python ./pipeline/setup-runner.py --versions $C4D_VERSION
+
+      - name: Grant accessibility to Cinema 4D
+        run: |
+          C4D_BIN="/Applications/Maxon Cinema 4D 2026/Cinema 4D.app/Contents/MacOS/Cinema 4D"
+          C4DPY_BIN="/Applications/Maxon Cinema 4D 2026/c4dpy.app/Contents/MacOS/c4dpy"
+          for BIN_PATH in "$C4D_BIN" "$C4DPY_BIN"; do
+            if [ -f "$BIN_PATH" ]; then
+              sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+                "INSERT OR REPLACE INTO access(service,client,client_type,auth_value,auth_reason,auth_version,csreq,policy_id,indirect_object_identifier_type,indirect_object_identifier,indirect_object_code_identity,flags,last_modified) \
+                VALUES('kTCCServiceAccessibility','${BIN_PATH}',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s));"
+            fi
+          done
+          sudo launchctl stop com.apple.tccd 2>/dev/null || true
+          sleep 2
+
+
+      - name: Prove multiprocessing bug and fix
+        run: |
+          echo "=== Test 1: multiprocessing.spawn INSIDE xdist worker (should FAIL) ==="
+          # This reproduces the exact failure: xdist worker -> multiprocessing.spawn -> child can't re-import <stdin>
+          hatch -e integ-xa11y run pytest --no-cov -vvv --numprocesses=1 --override-ini="addopts=" -k "NONEXISTENT_JUST_SETUP" test/integ_xa11y 2>&1 | tail -5 || true
+
+          # Minimal reproduction: simulate what xdist does (run code from stdin) then try spawn
+          echo "=== Test 2: spawn from stdin-based __main__ (reproduces the bug) ==="
+          hatch -e integ-xa11y run python -c "
+          import multiprocessing, sys, queue as Q
+          def child(q):
+              q.put('hello')
+          ctx = multiprocessing.get_context('spawn')
+          q = ctx.Queue()
+          p = ctx.Process(target=child, args=(q,), daemon=True)
+          p.start()
+          try:
+              msg = q.get(timeout=5)
+              print('UNEXPECTED SUCCESS: ' + msg)
+          except:
+              print('CONFIRMED BUG: spawn from stdin fails (child cannot re-import <stdin>)')
+              if p.is_alive():
+                  p.terminate()
+          " 2>&1 | grep -E "CONFIRMED|UNEXPECTED|Error" || true
+
+          echo ""
+          echo "=== Test 3: spawn WITHOUT xdist (the fix - should SUCCEED) ==="
+          # Run the mock server startup directly without xdist — proves the fix works
+          hatch -e integ-xa11y run python -c "
+          import sys, os
+          sys.path.insert(0, 'test/integ_xa11y')
+          os.environ.setdefault('MULTIPROCESSING_START_METHOD', 'spawn')
+          from mock_aws.server_process import MockServerProcess
+          server = MockServerProcess(response_delay_s=0.1)
+          server.start()
+          print('FIX CONFIRMED: MockServerProcess started at ' + server.base_url)
+          server.stop()
+          " 2>&1 | grep -E "FIX CONFIRMED|Error|Traceback" || true
+
+      - name: Install SSM plugin
+        run: |
+          curl -s "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/session-manager-plugin.pkg" -o "$RUNNER_TEMP/ssm-plugin.pkg"
+          sudo installer -pkg "$RUNNER_TEMP/ssm-plugin.pkg" -target /
+
+      - name: Bring up license tunnel and run tests
+        env:
+          LICENSE_RELAY_INSTANCE: ${{ secrets.LICENSE_RELAY_INSTANCE }}
+          RLM_PORT: ${{ secrets.RLM_PORT }}
+        run: |
+          rlmPort=$(echo "$RLM_PORT" | tr -d '[:space:]')
+          instance=$(echo "$LICENSE_RELAY_INSTANCE" | tr -d '[:space:]')
+
+          # Start SSM port forwarding in background
+          aws ssm start-session \
+            --target "$instance" \
+            --document-name AWS-StartPortForwardingSession \
+            --parameters "{\"portNumber\":[\"$rlmPort\"],\"localPortNumber\":[\"$rlmPort\"]}" &
+          SSM_PID=$!
+          sleep 10
+
+          if ! kill -0 "$SSM_PID" 2>/dev/null; then
+            echo "ERROR: SSM port forward failed to start"
+            exit 1
+          fi
+          echo "License tunnel up via SSM (PID $SSM_PID)"
+
+          hatch -e integ-xa11y run pytest --no-cov test/integ_xa11y -vvv -p no:xdist --override-ini="addopts="
+
+      - name: Tear down
+        if: always()
+        run: |
+          pkill -f "session-manager-plugin" 2>/dev/null || true

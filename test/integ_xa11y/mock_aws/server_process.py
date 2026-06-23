@@ -43,16 +43,25 @@ from .deadline import _ADMIN_CALLS_PATH
 
 def _serve(response_delay_s: float, port_queue) -> None:
     """Child-process entrypoint: start the server, report the port, serve forever."""
-    # Imported inside the child so the server module initializes in this process.
-    from .deadline import MockDeadlineBackend, start_server
+    import traceback
+    import sys
 
-    backend = MockDeadlineBackend(response_delay_s=response_delay_s)
-    # In-child logging goes to stderr (inherited by the test's captured output).
-    backend.log_callback = lambda msg: print(f"[mock-deadline] {msg}", flush=True)
-    server, base_url, _thread = start_server(backend)
-    port_queue.put(base_url)
-    # Serve until the parent terminates this process.
-    server.serve_forever()
+    try:
+        print("[mock-server-child] starting imports...", file=sys.stderr, flush=True)
+        from .deadline import MockDeadlineBackend, start_server
+
+        print("[mock-server-child] imports done, creating backend...", file=sys.stderr, flush=True)
+        backend = MockDeadlineBackend(response_delay_s=response_delay_s)
+        backend.log_callback = lambda msg: print(f"[mock-deadline] {msg}", flush=True)
+        print("[mock-server-child] starting server...", file=sys.stderr, flush=True)
+        server, base_url, _thread = start_server(backend)
+        print(f"[mock-server-child] server at {base_url}", file=sys.stderr, flush=True)
+        port_queue.put(base_url)
+        server.serve_forever()
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        port_queue.put(f"ERROR: {traceback.format_exc()}")
+        sys.exit(1)
 
 
 class RemoteBackend:
@@ -107,7 +116,22 @@ class MockServerProcess:
     def start(self) -> "MockServerProcess":
         # 'spawn' so the child is a clean interpreter (no inherited C4D/Qt/xa11y
         # state, no fork-after-threads hazards) on every platform.
-        ctx = multiprocessing.get_context("spawn")
+        # Exception: when running inside a pytest-xdist worker, __main__ is
+        # <stdin> which 'spawn' can't re-import. Fall back to 'fork' on
+        # macOS/Linux in that case (safe here — no Qt/xa11y loaded yet in fixture
+        # setup). On Windows, 'fork' doesn't exist so 'spawn' is the only option
+        # (and it works there because xdist uses a different worker bootstrap).
+        import os
+        import sys
+
+        method = os.environ.get("MULTIPROCESSING_START_METHOD", "")
+        if not method:
+            in_xdist = "PYTEST_XDIST_WORKER" in os.environ
+            if in_xdist and sys.platform != "win32":
+                method = "fork"
+            else:
+                method = "spawn"
+        ctx = multiprocessing.get_context(method)
         port_queue = ctx.Queue()
         self._proc = ctx.Process(
             target=_serve,
@@ -116,7 +140,21 @@ class MockServerProcess:
         )
         self._proc.start()
         # Wait for the child to bind and report its URL.
-        self.base_url = port_queue.get(timeout=30)
+        import sys
+
+        print(f"[MockServerProcess] child started (pid={self._proc.pid}, method={method})", flush=True)
+        try:
+            self.base_url = port_queue.get(timeout=30)
+        except Exception:
+            alive = self._proc.is_alive()
+            print(
+                f"[MockServerProcess] timeout! child alive={alive}, exitcode={self._proc.exitcode}",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
+        if self.base_url and self.base_url.startswith("ERROR:"):
+            raise RuntimeError(f"Mock server child failed: {self.base_url}")
         self.backend = RemoteBackend(self.base_url)
         self._wait_ready()
         return self
