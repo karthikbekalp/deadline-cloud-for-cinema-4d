@@ -95,13 +95,21 @@ jobs:
             --document-name AWS-StartPortForwardingSession \
             --parameters "{\"portNumber\":[\"$rlmPort\"],\"localPortNumber\":[\"$rlmPort\"]}" &
           SSM_PID=$!
-          sleep 10
 
-          if ! kill -0 "$SSM_PID" 2>/dev/null; then
-            echo "ERROR: SSM port forward failed to start"
+          # Wait for the local port to become available (retry up to 30s)
+          ready=false
+          for i in $(seq 1 6); do
+            sleep 5
+            if nc -z 127.0.0.1 "$rlmPort" 2>/dev/null; then
+              ready=true
+              break
+            fi
+          done
+          if [ "$ready" != "true" ]; then
+            echo "ERROR: SSM port forward not up on 127.0.0.1:$rlmPort after 30s"
             exit 1
           fi
-          echo "License tunnel up via SSM (PID $SSM_PID)"
+          echo "License tunnel up via SSM"
 
           hatch -e integ-xa11y run pytest --no-cov test/integ_xa11y -vvv -p no:xdist --override-ini="addopts="
 
