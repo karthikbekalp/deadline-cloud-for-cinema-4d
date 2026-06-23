@@ -14,7 +14,7 @@ parameterValues:
 - name: UseCachedText
   value: '0'
 - name: ChunkSize
-  value: 2
+  value: 1
 - name: TargetChunkDuration
   value: 0
 - name: Frames
