@@ -8,10 +8,15 @@ stdout once the server is ready, then serves until terminated.
 import sys
 from pathlib import Path
 
-# Add the repo root so both 'src' and 'test' packages are importable.
-_repo_root = Path(__file__).resolve().parents[4]
+# Find repo root by walking up to pyproject.toml.
+_here = Path(__file__).resolve().parent
+_repo_root = _here
+while _repo_root != _repo_root.parent:
+    if (_repo_root / "pyproject.toml").exists():
+        break
+    _repo_root = _repo_root.parent
 sys.path.insert(0, str(_repo_root / "src"))
-sys.path.insert(0, str(_repo_root / "test" / "integ_xa11y"))
+sys.path.insert(0, str(_here.parent))
 
 from mock_aws.deadline import MockDeadlineBackend, start_server
 
