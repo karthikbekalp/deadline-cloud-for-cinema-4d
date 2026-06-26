@@ -73,21 +73,39 @@ jobs:
 
       - name: Bring up license tunnel and run tests
         env:
-          LICENSE_RELAY_INSTANCE: ${{ secrets.LICENSE_RELAY_INSTANCE }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
           RLM_PORT: ${{ secrets.RLM_PORT }}
+          LICENSE_ROLE_ARN: ${{ secrets.LICENSE_ROLE_ARN }}
+          LICENSE_INSTANCE_TAG: ${{ secrets.LICENSE_INSTANCE_TAG }}
         run: |
           rlmPort=$(echo "$RLM_PORT" | tr -d '[:space:]')
-          instance=$(echo "$LICENSE_RELAY_INSTANCE" | tr -d '[:space:]')
+          region=$(echo "$AWS_REGION" | tr -d '[:space:]')
 
           # Install SSM plugin
           curl -s "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/session-manager-plugin.pkg" -o "$RUNNER_TEMP/ssm-plugin.pkg"
           sudo installer -pkg "$RUNNER_TEMP/ssm-plugin.pkg" -target /
 
+          # Configure a profile that assumes the licensing role. Credentials come
+          # from the OIDC creds already in the environment (credential_source=
+          # Environment), so the role is assumed transparently on each
+          # --profile license call -- nothing is printed or stored by us.
+          aws configure set profile.license.role_arn "$LICENSE_ROLE_ARN"
+          aws configure set profile.license.credential_source Environment
+          aws configure set profile.license.region "$region"
+
+          # Resolve the license host instance by tag at runtime (don't hardcode the ID)
+          instance=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$LICENSE_INSTANCE_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --profile license --region "$region" --output text)
+          if [ -z "$instance" ] || [ "$instance" = "None" ]; then echo "ERROR: License host not found"; exit 1; fi
+
           # Start SSM port forwarding
           aws ssm start-session \
             --target "$instance" \
             --document-name AWS-StartPortForwardingSession \
-            --parameters "{\"portNumber\":[\"$rlmPort\"],\"localPortNumber\":[\"$rlmPort\"]}" &
+            --parameters "{\"portNumber\":[\"$rlmPort\"],\"localPortNumber\":[\"$rlmPort\"]}" \
+            --profile license --region "$region" &
 
           # Wait for port (retry up to 30s)
           ready=false
