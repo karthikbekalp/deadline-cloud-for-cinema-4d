@@ -282,9 +282,11 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
     # doesn't produce a doubled separator ("Github Repos//deadline-..."). On
     # Windows the doubled separator was masked because replace_backslashes
     # collapses "\\+" to a single "/", but on POSIX the doubled "/" survived.
+    # Use rsplit to handle GitHub Actions paths where the repo name appears
+    # twice (e.g. D:/a/deadline-cloud-for-cinema-4d/deadline-cloud-for-cinema-4d/).
     prefix_path = (
         os.path.abspath(expected_job_bundle_dir_path)
-        .split("deadline-cloud-for-cinema-4d")[0]
+        .rsplit("deadline-cloud-for-cinema-4d", 1)[0]
         .rstrip("/\\")
     )
 

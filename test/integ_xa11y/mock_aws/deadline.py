@@ -364,8 +364,6 @@ def start_server(backend: MockDeadlineBackend, port: int = 0):
     routes = _discover_routes(backend)
     validator = _ResponseValidator()
     handler_cls = _make_handler(routes, validator, backend)
-    # Threading server so the artificial per-response delay represents genuine
-    # per-request latency rather than serializing concurrent submitter calls.
     server = _ThreadingHTTPServer(("127.0.0.1", port), handler_cls)
     actual_port = server.server_address[1]
     thread = _threading.Thread(target=server.serve_forever, daemon=True)
