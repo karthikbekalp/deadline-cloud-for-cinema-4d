@@ -11,16 +11,23 @@ from typing import Callable, Optional
 
 import pytest
 import xa11y
+from deadline_test_fixtures.job_bundle import (
+    JobBundleCase,
+    assert_valid_job_bundle,
+    find_complete_job_bundle,
+)
+from deadline_test_fixtures.xa11y import (
+    SharedSubmitterDialog,
+    find_accessibility_app,
+)
 from yaml import safe_load
 
 from .utils import (
     assert_all_images_close,
     assert_expected_job_bundle_and_generated_job_bundle_are_equal,
-    assert_is_valid_job_bundle,
     assert_openjd_run_with_cinema4d_successful,
     build_cinema4d_scene,
     build_submitter_pythonpath,
-    find_complete_bundle,
     kill_proc,
     log,
     resolve_c4d_exe,
@@ -72,26 +79,6 @@ def _prepend(new: str, existing: str, sep: str) -> str:
     return f"{new}{sep}{existing}" if existing else new
 
 
-def _wait_for_dialog_app(pid: int, name_prefix: str, timeout_s: float):
-    """Poll xa11y.App.list() for an app whose name starts with `name_prefix`
-    and whose PID matches. Returns the matching App or None on timeout.
-
-    The Qt submitter dialog registers as a separate UIA app from Cinema 4D
-    even though they share a process — so we have to enumerate apps and
-    pick the right one rather than going through the C4D app handle.
-    """
-    deadline_t = time.monotonic() + timeout_s
-    while time.monotonic() < deadline_t:
-        try:
-            for a in xa11y.App.list():
-                if a.pid == pid and a.name and a.name.startswith(name_prefix):
-                    return a
-        except Exception as e:
-            log(f"App.list() raised while polling: {e!r}")
-        time.sleep(0.5)
-    return None
-
-
 def _dump_plugin_diag_log(log_path: Path) -> None:
     """Echo the sidecar plugin's diagnostic log into the test output. C4D's
     stdout is detached from pytest's, so this is how the plugin's traces (scene
@@ -113,11 +100,8 @@ def _prepare_actual_dir(test_cases_folder_location: Path, case: str) -> tuple[Pa
     actual/ is compared against expected/. We rmtree it first so a prior failed
     run (which leaves actual/ behind for inspection) can't leak stale files into
     this run."""
-    case_folder = test_cases_folder_location / case
-    actual_dir = case_folder / "actual"
-    rmtree(actual_dir, ignore_errors=True)
-    os.makedirs(actual_dir, exist_ok=True)
-    return case_folder, actual_dir
+    bundle_case = JobBundleCase(test_cases_folder_location / case)
+    return bundle_case.root, bundle_case.prepare_actual_dir()
 
 
 def _build_cinema4d_scene(
@@ -240,17 +224,21 @@ def _resolve_dialog_app(proc: subprocess.Popen):
       - macOS AX: dialogs are child windows of the host app.
     """
     log(f"waiting up to {_C4D_BOOT_TIMEOUT_S:.0f}s for xa11y to attach by pid")
-    app = xa11y.App.by_pid(proc.pid, timeout=_C4D_BOOT_TIMEOUT_S)
-    log("xa11y attached to Cinema 4D")
-
     if sys.platform == "win32":
-        dialog_app = _wait_for_dialog_app(
-            pid=proc.pid,
-            name_prefix=_DIALOG_NAME_PREFIX,
-            timeout_s=_DIALOG_VISIBLE_TIMEOUT_S,
-        )
-        if dialog_app is None:
-            _dump_dialog_discovery_failure(app)
+        try:
+            dialog_app = find_accessibility_app(
+                proc.pid,
+                timeout=_C4D_BOOT_TIMEOUT_S + _DIALOG_VISIBLE_TIMEOUT_S,
+                name_prefix=_DIALOG_NAME_PREFIX,
+            )
+        except TimeoutError:
+            try:
+                host_app = find_accessibility_app(proc.pid, timeout=2.0)
+                _dump_dialog_discovery_failure(host_app)
+            except TimeoutError:
+                # Host-app discovery is diagnostics-only; preserve the original
+                # submitter-dialog timeout when the host is also unavailable.
+                pass
             raise AssertionError(
                 "Submitter dialog did not register with UIA "
                 f"(expected app name prefix {_DIALOG_NAME_PREFIX!r})"
@@ -258,8 +246,12 @@ def _resolve_dialog_app(proc: subprocess.Popen):
         log(f"submitter dialog UIA app: {dialog_app.name!r}")
     else:
         # On macOS the dialog is a child window of the C4D app.
-        dialog_app = app
+        dialog_app = find_accessibility_app(
+            proc.pid,
+            timeout=_C4D_BOOT_TIMEOUT_S,
+        )
         log("macOS: using C4D app handle for dialog discovery")
+    log("xa11y attached to Cinema 4D")
 
     # Dump the tree for diagnostics on first run / failures.
     try:
@@ -321,7 +313,7 @@ def _press_export_bundle(dialog, dialog_app) -> None:
     """Wait for the Export bundle button to be visible and enabled, then
     press it."""
     log(f"waiting for button: {_EXPORT_BUTTON_NAME!r}")
-    export_btn = dialog.descendant(f"button[name='{_EXPORT_BUTTON_NAME}']")
+    export_btn = SharedSubmitterDialog(dialog).button(_EXPORT_BUTTON_NAME)
     export_btn.wait_visible(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
     export_btn.wait_enabled(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
     log("pressing Export bundle")
@@ -338,7 +330,7 @@ def _press_export_bundle(dialog, dialog_app) -> None:
         raise
 
 
-def _dismiss_success_popup() -> None:
+def _dismiss_success_popup(pid: int) -> None:
     """Dismiss the "Saved the submission as a job bundle" popup promptly.
 
     The popup is deadline-cloud's success QMessageBox. Two things make it
@@ -351,17 +343,19 @@ def _dismiss_success_popup() -> None:
       anchor is the message body static_text, which starts with "Saved the
       submission as a job bundle".
 
-    So we poll all apps for a dialog/window/sheet containing that body text and
-    press its OK button. Best-effort and non-fatal: the bundle is already on
-    disk and asserted separately. Polling (rather than one 5s blocking
-    wait_visible that previously always timed out and left the popup up) makes
-    this dismiss within a fraction of a second once the popup appears.
+    So we poll the accessibility roots belonging to the launched Cinema 4D
+    process for a dialog/window/sheet containing that body text and press its
+    OK button. Restricting by PID avoids querying unrelated applications whose
+    accessibility providers may be unresponsive. Best-effort and non-fatal:
+    the bundle is already on disk and asserted separately.
     """
     log("dismissing success popup ('Saved the submission as a job bundle')")
     deadline_t = time.monotonic() + 5.0
     while time.monotonic() < deadline_t:
         try:
             for app in xa11y.App.list():
+                if app.pid != pid:
+                    continue
                 ok = app.locator(
                     "dialog button[name='OK'], "
                     "window button[name='OK'], "
@@ -444,12 +438,12 @@ def _drive_submitter_ui(
     # The submitter writes the bundle files and only then shows the success
     # popup (on_export_bundle in submit_job_to_deadline_dialog.py), so once the
     # popup is up the bundle is complete on disk and we can read it directly.
-    _dismiss_success_popup()
+    _dismiss_success_popup(proc.pid)
     # Note: on Windows the submitter would normally open the bundle folder in
     # File Explorer (os.startfile); the sidecar plugin suppresses that in mock
     # mode, so there's no Explorer window to clean up here.
 
-    staged_bundle = find_complete_bundle(history_dir)
+    staged_bundle = find_complete_job_bundle(history_dir)
     assert (
         staged_bundle is not None
     ), f"success popup shown but no complete bundle found under {history_dir}"
@@ -603,19 +597,22 @@ def test_integ(
     )
 
     # The submitter ran against the mock backend, not real AWS. Prove its calls
-    # reached our server and nothing hit an unmocked route. call_counts lives in
-    # this process; the C4D subprocess populated it over HTTP.
+    # reached our server and nothing hit an unmocked route. The out-of-process
+    # mock exposes these counters through its admin endpoint.
     backend = deadline_farm["backend"]
     log(f"mock backend call_counts: {dict(backend.call_counts)}")
     assert (
         backend.unmatched_requests == []
     ), f"submitter hit routes the mock doesn't implement: {backend.unmatched_requests}"
-    for op in ("ListFarms", "ListQueues", "ListQueueEnvironments"):
+    for op in ("ListFarms", "ListQueueEnvironments"):
         assert (
             backend.call_counts.get(op, 0) >= 1
         ), f"expected the submitter to call {op}; saw {dict(backend.call_counts)}"
+    assert any(
+        backend.call_counts.get(op, 0) >= 1 for op in ("GetQueue", "ListQueues")
+    ), f"expected a queue lookup; saw {dict(backend.call_counts)}"
 
-    assert_is_valid_job_bundle(actual_dir / "template.yaml")
+    assert_valid_job_bundle(actual_dir / "template.yaml")
 
     assert_expected_job_bundle_and_generated_job_bundle_are_equal(
         case_folder / "expected" / "job_bundle", actual_dir
