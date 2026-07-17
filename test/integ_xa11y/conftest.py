@@ -11,8 +11,13 @@ import sys
 
 from pathlib import Path
 
-from .mock_aws.server_process import MockServerProcess
-from .mock_aws.wiring import build_mock_env, write_deadline_config
+from deadline_test_fixtures.deadline_mock import (
+    MockDeadlineScenario,
+    MockDeadlineServerProcess,
+    build_mock_environment,
+    write_deadline_config,
+)
+
 from .utils import c4d_extra_python_paths
 
 # Default install paths per version and platform.
@@ -107,7 +112,7 @@ def deadline_farm(tmp_path):
        starve an in-process server thread, so the server needs its own GIL to
        keep serving the C4D subprocess. Its observability (call_counts,
        request_log, unmatched_requests) is read back over an admin endpoint via
-       a RemoteBackend proxy,
+       a RemoteDeadlineBackend proxy,
     2. writes a temp deadline config naming the mock's farm/queue,
     3. builds the env overlay (endpoint override + dummy creds + telemetry opt-out
        + isolated HOME + config path + mock-mode flag) that the launch env applies
@@ -123,7 +128,7 @@ def deadline_farm(tmp_path):
     # 200-600ms. Override via env var to experiment.
     delay = float(os.environ.get("MOCK_DEADLINE_RESPONSE_DELAY_S", "0.3"))
 
-    server = MockServerProcess(response_delay_s=delay).start()
+    server = MockDeadlineServerProcess(MockDeadlineScenario(response_delay_s=delay)).start()
     # start() has populated these; assert so the types narrow from Optional.
     assert server.backend is not None and server.base_url is not None
     backend = server.backend
@@ -139,7 +144,7 @@ def deadline_farm(tmp_path):
         queue_id=backend.queue_id,
         job_history_dir=job_history_dir,
     )
-    env_overlay = build_mock_env(
+    env_overlay = build_mock_environment(
         dict(os.environ),
         deadline_endpoint_url=server.base_url,
         config_path=config_path,

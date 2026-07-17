@@ -17,10 +17,9 @@ test/
 ├── integ_xa11y/             # xa11y-driven submitter test, offline mock backend
 │   ├── test_cases/          # Self-contained cases: input/ expected/ actual/
 │   ├── test_cinema4d.py     # Drives the real submitter dialog via xa11y
-│   ├── submitter_ui.py      # Page-object for driving the dialog from configure.py
+│   ├── submitter_ui.py      # C4D-specific controls; re-exports shared controls
 │   ├── conftest.py          # Fixtures, incl. deadline_farm (starts the mock)
 │   ├── utils.py             # Test utilities
-│   ├── mock_aws/            # Hand-rolled offline mock Deadline Cloud backend
 │   └── fixtures/            # Test-only sidecar plugin (auto-opens submitter)
 └── installer/               # Installer tests
 ```
@@ -167,12 +166,11 @@ pytest (parent process)
 |------|------|
 | `test_cinema4d.py` | The test. Orchestrates scene build → launch → UI drive → assertions. Holds the `_CASES` registry. |
 | `conftest.py` | Fixtures: locate Cinema 4D, set `C4DPYTHONPATH`, and `deadline_farm` (starts the mock + builds the subprocess env). |
-| `submitter_ui.py` | Page-object for driving the dialog (tabs, fields, checkboxes) from a case's `configure.py`. |
-| `utils.py` | Helpers: exe resolution, scene build, bundle waiting, golden-bundle + image comparison. |
-| `mock_aws/deadline.py` | In-memory mock Deadline backend (rest-json) + HTTP server, with observability (`call_counts`, `request_log`, `unmatched_requests`). |
-| `mock_aws/server_process.py` | Runs the mock in a separate process; `RemoteBackend` reads observability over a `GET /__admin__/calls` admin endpoint. |
-| `mock_aws/wiring.py` | Builds the temp deadline config + subprocess env overlay pointing C4D at the mock. |
-| `mock_aws/fixtures_data.py` | Sanitized real response bodies (fake farm/queue IDs) the mock serves. |
+| `submitter_ui.py` | C4D-specific controls plus re-exports of shared controls from `deadline_test_fixtures.xa11y.controls`. |
+| `utils.py` | C4D executable/scene/render helpers and C4D's bundle normalization policy. Generic assertions come from `deadline-cloud-test-fixtures`. |
+| `deadline_test_fixtures.deadline_mock` | Scenario-driven Deadline REST-JSON mock, out-of-process lifecycle, observability, config, and environment wiring. |
+| `deadline_test_fixtures.job_bundle` | Shared case layout, bundle discovery, validation, and structural comparison. |
+| `deadline_test_fixtures.images` | Shared render-image comparison. |
 | `fixtures/auto_open_submitter/AutoOpenSubmitter.pyp` | Test-only C4D plugin: auto-opens the real submitter and (mock mode) applies the getaddrinfo / `os.startfile` patches. Never shipped. |
 | `test_cases/<name>/` | A self-contained case (see *Anatomy of a test case*). |
 
@@ -224,11 +222,11 @@ $env:DIALOG_DUMP=1; hatch -e integ-xa11y run pytest --no-cov `
     test/integ_xa11y/test_cinema4d.py --numprocesses=0 -s -k <case>; $env:DIALOG_DUMP=$null
 ```
 
-Each line is `<role> "<name>" value="<value>"`. Match on role + name. Gotchas
-that the live tree reveals (and which differ by platform) are documented in
-`submitter_ui.py` — read them before writing a selector. The reusable page-object
-helpers there (`set_priority`, `toggle_checkbox`, `set_spin_button`, …) already
-encode the harvested selectors, so prefer them over raw `descendant(...)` calls.
+Each line is `<role> "<name>" value="<value>"`. Match on role + name. Shared
+cross-platform widget behavior and selector gotchas are documented in
+`deadline_test_fixtures.xa11y.controls`; Cinema 4D-specific selectors remain in
+`submitter_ui.py`. Prefer the reusable helpers exposed by `submitter_ui.py` over
+raw `descendant(...)` calls.
 
 #### Offline mock architecture
 
@@ -237,20 +235,19 @@ lives in the **sidecar** plugin, not the shipped `DeadlineCloud.pyp`, so the rea
 plugin is exercised exactly as a customer would and no test-only code reaches
 production.
 
-- **Mock backend** (`mock_aws/deadline.py`): an in-memory Deadline Cloud
-  simulator serving only the four operations the Export-bundle flow calls with
-  an empty queue-environment list — `ListFarms`, `GetFarm`, `GetQueue`,
-  `ListQueueEnvironments` (no `GetQueueEnvironment`, since the env list is
-  empty). It records `call_counts` / `request_log` / `unmatched_requests` so the
+- **Mock backend** (`deadline_test_fixtures.deadline_mock`): an in-memory
+  Deadline Cloud simulator serving the resource-read operations used by
+  submitters, with an empty queue-environment list by default. It records
+  `call_counts` / `request_log` / `unmatched_requests` so the
   test can assert exactly which calls reached it and that nothing hit an unmocked
-  route. Seeded from sanitized real response data in `mock_aws/fixtures_data.py`.
-- **Separate process** (`mock_aws/server_process.py`): the mock runs in its own
+  route. Its default scenario provides stable fake farm and queue resources.
+- **Separate process** (`MockDeadlineServerProcess`): the mock runs in its own
   process, NOT a thread. xa11y's native `wait_*` calls hold the CPython GIL for
   most of their duration, which would starve an in-process server thread and
   hang the test for the full 60s timeout. The out-of-process server keeps
-  serving; the test reads its observability over a `GET /__admin__/calls` admin
-  endpoint via a `RemoteBackend` proxy.
-- **Subprocess wiring** (`mock_aws/wiring.py` + the `deadline_farm` fixture):
+  serving; the test reads its observability over the package's admin endpoint
+  via a `RemoteDeadlineBackend` proxy.
+- **Subprocess wiring** (`build_mock_environment` + the `deadline_farm` fixture):
   a temp `deadline config` names the mock's farm/queue, and the C4D subprocess
   env gets `AWS_ENDPOINT_URL_DEADLINE` → mock, dummy AWS creds, telemetry
   opt-out (so no STS call fires), an isolated `HOME`, and
@@ -307,7 +304,7 @@ Caveats:
 #### Golden-bundle comparison
 
 Direct byte comparison would be too brittle, so before comparing, the helper
-(`assert_expected_job_bundle_and_generated_job_bundle_are_equal`) normalizes a
+(`BundleNormalization` through the local comparison wrapper) normalizes a
 fixed set of moving parts: `PATH_TO_BE_REPLACED` → the local repo prefix;
 backslashes → forward slashes (preserving unicode escapes);
 `SubmitterIntegrationVersion` (changes every build) → a fixed placeholder; and
@@ -360,8 +357,9 @@ comparison parses both, but commit block YAML (re-serialize with
 **New mocked operation:** if a submitter change calls a Deadline operation the
 mock doesn't implement, the test fails its `unmatched_requests` assertion (and
 the mock logs `404 NO ROUTE`). Add a `@route`-decorated handler in
-`mock_aws/deadline.py` and, if it returns resource data, seed
-`mock_aws/fixtures_data.py`.
+`deadline_test_fixtures.deadline_mock.MockDeadlineBackend`. If it returns
+resource data, extend `MockDeadlineScenario` there. Keep DCC-specific launch
+behavior in this repository.
 
 ## Installer Tests
 
