@@ -113,9 +113,15 @@ def build_cinema4d_scene(
     scene_script_location: Path,
     scene_dir: Path,
     scene_name: str,
+    scene_args: tuple[str, ...] = (),
 ) -> Path:
     result = subprocess.run(
-        [str(c4dpy_location), str(scene_script_location), str(scene_dir)],
+        [
+            str(c4dpy_location),
+            str(scene_script_location),
+            str(scene_dir),
+            *scene_args,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -165,6 +171,10 @@ def assert_expected_job_bundle_and_generated_job_bundle_are_equal(
                 (
                     r"cinema4d=202[4-9]\.\* cinema4d-openjd=0\.\d+\.\*",
                     "cinema4d=2026.* cinema4d-openjd=0.8.*",
+                ),
+                (
+                    r"scene_with_assets_[^/\\]+",
+                    "scene_with_assets_NORMALIZED",
                 ),
             ),
             normalized_parameter_values={
