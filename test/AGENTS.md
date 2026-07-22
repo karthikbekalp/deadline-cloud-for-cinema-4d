@@ -76,13 +76,14 @@ test/integ/test_scenes/<scene_name>/
 | `physical` | Physical | Basic physical renderer test |
 | `phy_apos_path` | Physical | Path with special characters (apostrophes) |
 | `physical_chunking` | Physical | Frame chunking across tasks |
+| `physical_custom_fps` | Physical | Custom frames-per-second setting |
 | `physical_multi_takes` | Physical | Multiple takes rendering |
 | `physical_textured` | Physical | Scene with textures |
 | `physical_tiles` | Physical | Tile rendering |
 | `redshift` | Redshift | Basic Redshift render |
 | `redshift_takes` | Redshift | Redshift with multiple takes |
 | `redshift_textured` | Redshift | Redshift with textures |
-| `redshift_textured_with_nonascii_characters` | Redshift | Non-ASCII path handling |
+| `redshift_textured_nonascii` | Redshift | Non-ASCII path handling |
 | `redshift_tiles` | Redshift | Redshift tile rendering |
 
 ### Adding a new test scene
@@ -129,7 +130,7 @@ pytest (parent process)
   │     └─ builds the subprocess env overlay (endpoint override, dummy creds,
   │           telemetry opt-out, isolated HOME, DEADLINE_CLOUD_MOCK_MODE=1)
   │
-  ├─ build_cinema4d_scene()  ── runs c4dpy input/scene.py ──▶ cube.c4d (in actual/)
+  ├─ build_cinema4d_scene()  ── runs c4dpy input/scene.py ──▶ <case>.c4d (in actual/)
   │
   └─ launches Cinema 4D GUI (child process)
          │   env: overlay above + two plugin dirs + python path
@@ -139,7 +140,7 @@ pytest (parent process)
          │      on C4DPL_PROGRAM_STARTED (mock mode):
          │        1. patch socket.getaddrinfo (management.* → 127.0.0.1)
          │        2. patch os.startfile → no-op (no Explorer popup)
-         │        3. LoadDocument(cube.c4d)
+         │        3. LoadDocument(<case>.c4d)
          │        4. CallCommand(SUBMITTER_PLUGIN_ID)  ◀─ opens real submitter
          │
          └─ Qt submitter dialog appears ──── AWS_ENDPOINT_URL_DEADLINE ───▶ mock
@@ -190,17 +191,40 @@ test_cases/<name>/
 └── actual/                # gitignored — runtime output; kept on failure
 ```
 
-Cases are **registered explicitly** in the `_CASES` list in `test_cinema4d.py`
-— adding the folder is not enough, you add its name to the list. The expected
-bundle works on every platform and is **not** farm-specific (the mock provides
-fake, stable farm/queue IDs and no queue environments), so the expected files
-are portable and don't need per-farm regeneration.
+Cases are **registered explicitly** in `test_cinema4d.py`, either in `_CASES` or
+in a dedicated parametrized test — adding the folder is not enough. Most cases
+use `expected/{job_bundle,renders}/`; a parametrized case can keep one scene and
+configurator while storing each variant under
+`expected/<variant>/{job_bundle,renders}/`. The expected bundle works on every
+platform and is **not** farm-specific (the mock provides fake, stable farm/queue
+IDs and no queue environments), so the expected files are portable and don't
+need per-farm regeneration.
 
 `input/scene.py` runs inside **c4dpy** (Cinema 4D's headless Python) and is saved
-into `actual/` (not `input/`), so the render path `renders/$prj` resolves into
-`actual/renders/`. The render comparison derives its directory from the bundle's
-`OutputPath` param, so a `configure.py` that overrides the output path is
-followed automatically.
+into `actual/` (not `input/`), so render paths under `renders/` resolve into
+`actual/renders/`. Cases may override the output filename, but keep this
+directory stable for render comparison.
+
+#### Focused settings coverage
+
+Each settings case changes only the named setting group before exporting:
+
+| Case | Covered controls |
+|------|------------------|
+| `shared_job_settings` | Job name, priority, maximum failed tasks, maximum retries |
+| `job_specific_output_path` | Override Output Path and path value |
+| `job_specific_multi_pass_path` | Override Multi-Pass Path and path value |
+| `job_specific_take_selection` | Current, Main, and All Takes modes and their generated steps |
+| `physical_multi_takes` | All Takes naming, truncation, and deduplication edge cases |
+| `job_specific_frame_range` | Override Frame Range and frame expression |
+| `job_specific_detailed_logging` | Detailed logging |
+| `job_specific_timeouts` | Task Run, Cinema 4D launch, and Cinema 4D shutdown timeouts |
+| `job_specific_save_project_with_assets` | Save project with assets |
+| `job_specific_task_chunking` | Frames per chunk and target chunk duration |
+| `job_specific_tile_rendering` | Tile rendering, columns, and rows |
+
+The environment-gated **Include Adaptor Wheels** developer option is excluded
+because it is not present in the customer-facing dialog.
 
 #### Finding selectors (harvesting locators for a `configure.py`)
 
@@ -227,6 +251,29 @@ cross-platform widget behavior and selector gotchas are documented in
 `deadline_test_fixtures.xa11y.controls`; Cinema 4D-specific selectors remain in
 `submitter_ui.py`. Prefer the reusable helpers exposed by `submitter_ui.py` over
 raw `descendant(...)` calls.
+
+#### Watching a run manually (observation delays)
+
+Two env vars slow a run down so a human can follow it. Both default to `0`
+(off) — never leave them set for normal runs:
+
+- `DIALOG_CONFIG_OBSERVE_DELAY_S=<seconds>` — pause after **every dialog
+  interaction** (tab switch, checkbox, text field, each spin-button step).
+  Implemented by `_observe_pause()` in `deadline_test_fixtures.xa11y.controls`,
+  so every `submitter_ui.py` helper inherits it.
+- `ARTIFACT_REVIEW_DELAY_S=<seconds>` — pause in `_run_integ_case` after all
+  assertions pass but **before `actual/` is cleaned up**, so the exported
+  bundle and renders can be inspected. The log prints the directory to look in.
+
+```powershell
+# Windows PowerShell: 5s per interaction, 60s artifact review
+$env:DIALOG_CONFIG_OBSERVE_DELAY_S=5; $env:ARTIFACT_REVIEW_DELAY_S=60
+hatch -e integ-xa11y run python -m pytest --no-cov test/integ_xa11y/test_cinema4d.py --numprocesses=0 -s -k <case>
+$env:DIALOG_CONFIG_OBSERVE_DELAY_S=$null; $env:ARTIFACT_REVIEW_DELAY_S=$null
+```
+
+Related: `MOCK_DEADLINE_RESPONSE_DELAY_S` (default `0.3`) sets the mock
+backend's per-response latency to approximate the real farm.
 
 #### Offline mock architecture
 
@@ -272,14 +319,14 @@ hatch run integ-xa11y:test                        # all xa11y integ tests
 The `integ-xa11y:test` script hardcodes the `test/integ_xa11y` path and
 `--numprocesses=1`. Beware: any args you pass *replace* the path (hatch
 `{args:test/integ_xa11y}` falls back to the global `testpaths = ["test"]`), so
-`hatch run integ-xa11y:test -k cube` would scan the whole `test/` tree. To
+`hatch run integ-xa11y:test -k physical` would scan the whole `test/` tree. To
 filter or run in-process (e.g. to see C4D/xa11y stdout, which xdist hides), call
 pytest directly with an explicit path — the test spawns its own subprocesses
 regardless of `--numprocesses`:
 
 ```bash
 hatch -e integ-xa11y run pytest --no-cov test/integ_xa11y/test_cinema4d.py \
-    --numprocesses=0 -s -k cube
+    --numprocesses=0 -s -k physical
 ```
 
 #### Platform support matrix
@@ -315,7 +362,7 @@ exactly the three files (`template.yaml`, `parameter_values.yaml`,
 #### Adding / changing a case
 
 **Plain case (no UI interaction):**
-1. Create `test_cases/<name>/input/scene.py` (model it on `cube`'s).
+1. Create `test_cases/<name>/input/scene.py` (model it on `physical`'s).
 2. Add `"<name>"` to the `_CASES` list in `test_cinema4d.py`.
 3. Run it once (it fails — `expected/` is empty), capture the golden (below), re-run.
 
@@ -332,12 +379,15 @@ def configure(dialog):
 ```
 
 It runs after the dialog settles and before Export. See `submitter_ui.py` for
-the helpers and gotchas, and `cube`'s `input/configure.py` for a worked example.
+the helpers and gotchas, and `shared_job_settings`'s `input/configure.py` for a worked example.
 
 **Capturing the golden bundle (manual):** after a run, the generated bundle is in
 the case's `actual/`. Copy the three files into `expected/job_bundle/`, replacing
 the absolute prefix up to (not including) `deadline-cloud-for-cinema-4d` with
-`PATH_TO_BE_REPLACED`:
+`PATH_TO_BE_REPLACED`, and **strip `jobEnvironments` from `template.yaml`** —
+it embeds the detailed-logging scripts (hundreds of lines that change with
+unrelated code edits), and the comparison ignores it anyway
+(`ignored_template_keys`), so committing it is pure noise:
 
 ```bash
 case=<name>
@@ -347,6 +397,15 @@ for f in template.yaml parameter_values.yaml asset_references.yaml; do
     test/integ_xa11y/test_cases/$case/actual/$f \
     > test/integ_xa11y/test_cases/$case/expected/job_bundle/$f
 done
+python - << 'EOF'
+import io, os, yaml
+from deadline.client.job_bundle._yaml import deadline_yaml_dump
+p = f"test/integ_xa11y/test_cases/{os.environ['case']}/expected/job_bundle/template.yaml"
+data = yaml.safe_load(open(p, encoding="utf-8"))
+data.pop("jobEnvironments", None)
+buf = io.StringIO(); deadline_yaml_dump(data, buf)
+open(p, "w", encoding="utf-8", newline="\n").write(buf.getvalue())
+EOF
 ```
 
 The submitter sometimes emits `parameter_values.yaml` as single-line JSON; the

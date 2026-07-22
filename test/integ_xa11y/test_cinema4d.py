@@ -20,8 +20,6 @@ from deadline_test_fixtures.xa11y import (
     SharedSubmitterDialog,
     find_accessibility_app,
 )
-from yaml import safe_load
-
 from .utils import (
     assert_all_images_close,
     assert_expected_job_bundle_and_generated_job_bundle_are_equal,
@@ -57,6 +55,13 @@ _EXPORT_BUTTON_NAME = "Export bundle"
 
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
+
+# Most cases save `<case>.c4d` directly under actual/. These two deliberately
+# differ to exercise path handling and therefore need explicit relative paths.
+_SCENE_RELATIVE_PATHS = {
+    "phy_apos_path": Path("it's") / "phy_apos_path.c4d",
+    "redshift_textured_nonascii": Path("rs_test-\u20bf\u0119\u00f1.c4d"),
+}
 
 # A per-scene hook to drive the submitter dialog (switch tabs, set parameters,
 # toggle options) after it has loaded but before Export bundle is pressed. It
@@ -109,6 +114,7 @@ def _build_cinema4d_scene(
     case_folder: Path,
     actual_dir: Path,
     case: str,
+    scene_args: tuple[str, ...] = (),
 ) -> Path:
     """Build the case's scene with c4dpy and return the saved scene path.
 
@@ -120,7 +126,14 @@ def _build_cinema4d_scene(
     """
     c4dpy_location = resolve_c4d_exe(cinema4d_location, "c4dpy")
     scene_script = case_folder / "input" / "scene.py"
-    return build_cinema4d_scene(c4dpy_location, scene_script, actual_dir, f"{case}.c4d")
+    scene_relative_path = _SCENE_RELATIVE_PATHS.get(case, Path(f"{case}.c4d"))
+    return build_cinema4d_scene(
+        c4dpy_location,
+        scene_script,
+        actual_dir,
+        str(scene_relative_path),
+        scene_args,
+    )
 
 
 def _build_launch_env(
@@ -491,13 +504,18 @@ def _export_job_bundle_via_submitter(
         log(f"removed staging dir: {bundle_staging}")
 
 
-def _load_configurator(case: str) -> Optional[DialogConfigurator]:
+def _load_configurator(
+    case: str,
+    configure_kwargs: Optional[dict[str, str]] = None,
+) -> Optional[DialogConfigurator]:
     """Load a case's optional input/configure.py and return its `configure`
     callable, or None if the case has no configurator.
 
-    A configure.py must define a top-level `configure(dialog)` function. If the
-    file exists but is malformed or missing that function, we raise -- a broken
-    configurator should fail loudly, not be silently skipped."""
+    A configure.py must define a top-level `configure(dialog, ...)` function.
+    Keyword arguments let a parametrized case reuse one configurator for
+    multiple settings. If the file is malformed or missing that function, we
+    raise -- a broken configurator should fail loudly, not be silently skipped.
+    """
     # `case` comes from the _CASES registry, but guard against a name that would
     # escape test_cases/ (path separators or ..) so a typo can't load arbitrary
     # files.
@@ -506,6 +524,8 @@ def _load_configurator(case: str) -> Optional[DialogConfigurator]:
     if not config_path.is_relative_to(cases_root):
         raise ValueError(f"case {case!r} resolves outside test_cases/")
     if not config_path.is_file():
+        if configure_kwargs:
+            raise FileNotFoundError(f"{config_path} is required when configure arguments are set")
         return None
     spec = importlib.util.spec_from_file_location(f"_configure_{case}", config_path)
     if spec is None or spec.loader is None:
@@ -515,78 +535,32 @@ def _load_configurator(case: str) -> Optional[DialogConfigurator]:
     configure = getattr(module, "configure", None)
     if not callable(configure):
         raise AttributeError(f"{config_path} must define a top-level configure(dialog) function")
+    if configure_kwargs:
+        return lambda dialog: configure(dialog, **configure_kwargs)
     return configure
 
 
-def _actual_render_dir(actual_dir: Path) -> Path:
-    """Where this run's renders landed, derived from the generated bundle's
-    OutputPath parameter rather than hard-coded.
-
-    The submitter writes the resolved absolute output path into
-    parameter_values.yaml as OutputPath (e.g. .../actual/renders/cube or, if a
-    configurator overrode it, .../actual/render/cube). Reading it back lets a
-    case render wherever its config dictates and the comparison still follows.
-    Falls back to actual/renders if the param is absent."""
-    params_file = actual_dir / "parameter_values.yaml"
-    try:
-        values = safe_load(params_file.read_text(encoding="utf-8"))["parameterValues"]
-        output_path = next(v["value"] for v in values if v["name"] == "OutputPath")
-        # OutputPath points at the render file prefix (.../<dir>/<prj>); its
-        # parent is the directory the PNGs are written into.
-        return Path(output_path).parent
-    except (FileNotFoundError, KeyError, StopIteration):
-        return actual_dir / "renders"
-
-
-# Registered test cases. Each entry is a folder name under test_cases/ with an
-# input/scene.py (required) and an optional input/configure.py (loaded as the
-# dialog configurator). To add a case: create the folder (see test/AGENTS.md)
-# and add its name here.
-_CASES = [
-    "cube",
-]
-
-
-@pytest.mark.parametrize("case", _CASES)
-def test_integ(
+def _run_integ_case(
     cinema4d_location: Path,
     test_cases_folder_location: Path,
     deadline_farm: dict,
     case: str,
+    *,
+    expected_variant: Optional[str] = None,
+    configure_kwargs: Optional[dict[str, str]] = None,
+    scene_args: tuple[str, ...] = (),
 ) -> None:
-    """
-    Performs integration testing for Cinema 4D rendering, driven through
-    the real submitter UI via xa11y.
-
-    The body reads as the sequence of steps it performs; see each helper for
-    the details. Two facts the call sequence doesn't make obvious: the
-    test-only sidecar plugin auto-opens the real submitter once Cinema 4D
-    finishes starting, and the openjd run + render compare is skipped on
-    macOS (submitter-only coverage there).
-
-    A case is a folder under test_cases/: input/scene.py (required), optional
-    input/configure.py (drives the dialog before Export), and
-    expected/{job_bundle,renders}/ to compare against. The runtime output goes
-    to the case's actual/ dir.
-
-    Args:
-        cinema4d_location (Path): Path to the Cinema 4D installation directory
-        test_cases_folder_location (Path): Root directory containing test cases
-        case (str): The case folder name under test_cases/ (from _CASES)
-
-    Raises:
-        AssertionError: If any validation step fails, including:
-            - Cinema 4D failing to launch
-            - Submitter dialog not appearing in the UIA tree
-            - Export bundle not producing the expected files
-            - openjd check reporting a non-success status
-            - generated bundle differing from expected/job_bundle/
-            - openjd run failing for any step
-    """
+    """Build, export, validate, and optionally render one case configuration."""
     case_folder, actual_dir = _prepare_actual_dir(test_cases_folder_location, case)
-    configure = _load_configurator(case)
+    configure = _load_configurator(case, configure_kwargs)
 
-    scene_path = _build_cinema4d_scene(cinema4d_location, case_folder, actual_dir, case)
+    scene_path = _build_cinema4d_scene(
+        cinema4d_location,
+        case_folder,
+        actual_dir,
+        case,
+        scene_args,
+    )
 
     _export_job_bundle_via_submitter(
         cinema4d_location=cinema4d_location,
@@ -614,15 +588,18 @@ def test_integ(
 
     assert_valid_job_bundle(actual_dir / "template.yaml")
 
+    expected_dir = case_folder / "expected"
+    if expected_variant is not None:
+        expected_dir /= expected_variant
     assert_expected_job_bundle_and_generated_job_bundle_are_equal(
-        case_folder / "expected" / "job_bundle", actual_dir
+        expected_dir / "job_bundle", actual_dir
     )
 
     # Run the bundle via openjd and compare rendered output. This adaptor
     # portion only runs on Windows; on macOS the test is submitter-only (the
     # render path needs Conda-managed cinema4d-openjd, which we don't ship for
-    # darwin yet). The render dir is derived from the bundle's OutputPath, so a
-    # configurator that overrides the output path is followed automatically.
+    # darwin yet). Every case keeps its output directory at actual/renders;
+    # output-path cases vary only the filename.
     if sys.platform != "darwin":
         assert_openjd_run_with_cinema4d_successful(
             cinema4d_location,
@@ -630,9 +607,87 @@ def test_integ(
             actual_dir / "parameter_values.yaml",
         )
         assert_all_images_close(
-            case_folder / "expected" / "renders",
-            _actual_render_dir(actual_dir),
+            expected_dir / "renders",
+            actual_dir / "renders",
         )
+
+    # ARTIFACT_REVIEW_DELAY_S pauses here — after all assertions, before
+    # cleanup — so the exported bundle and renders in actual/ can be inspected
+    # manually. Pairs with DIALOG_CONFIG_OBSERVE_DELAY_S for watching the
+    # dialog interactions themselves.
+    review_delay = float(os.environ.get("ARTIFACT_REVIEW_DELAY_S", "0"))
+    if review_delay > 0:
+        log(f"pausing {review_delay:.0f}s for manual review of artifacts in {actual_dir}")
+        time.sleep(review_delay)
 
     # Clean up if the test was successful
     rmtree(actual_dir, ignore_errors=True)
+
+
+# Standard test cases. Each entry is a folder name under test_cases/ with an
+# input/scene.py (required) and an optional input/configure.py (loaded as the
+# dialog configurator). Parametrized case-specific coverage is registered
+# separately below.
+_CASES = [
+    "shared_job_settings",
+    "job_specific_output_path",
+    "job_specific_multi_pass_path",
+    "job_specific_frame_range",
+    "job_specific_detailed_logging",
+    "job_specific_timeouts",
+    "job_specific_save_project_with_assets",
+    "job_specific_task_chunking",
+    "job_specific_tile_rendering",
+    "physical",
+    "physical_textured",
+    "physical_custom_fps",
+    "physical_multi_takes",
+    "physical_tiles_multi_takes",
+    "phy_apos_path",
+    "redshift",
+    "redshift_textured",
+    "redshift_textured_nonascii",
+    "redshift_tiles",
+]
+
+_TAKE_SELECTIONS = [
+    pytest.param("current", "Current Take", id="current"),
+    pytest.param("main", "Main Take", id="main"),
+    pytest.param("all", "All Takes", id="all"),
+]
+
+
+@pytest.mark.parametrize("case", _CASES)
+def test_integ(
+    cinema4d_location: Path,
+    test_cases_folder_location: Path,
+    deadline_farm: dict,
+    case: str,
+) -> None:
+    """Exercise one standard scene through the real submitter UI."""
+    _run_integ_case(
+        cinema4d_location,
+        test_cases_folder_location,
+        deadline_farm,
+        case,
+    )
+
+
+@pytest.mark.parametrize(("expected_variant", "selection"), _TAKE_SELECTIONS)
+def test_job_specific_take_selection(
+    cinema4d_location: Path,
+    test_cases_folder_location: Path,
+    deadline_farm: dict,
+    expected_variant: str,
+    selection: str,
+) -> None:
+    """Verify Current, Main, and All Takes produce the intended job steps."""
+    _run_integ_case(
+        cinema4d_location,
+        test_cases_folder_location,
+        deadline_farm,
+        "job_specific_take_selection",
+        expected_variant=expected_variant,
+        configure_kwargs={"selection": selection},
+        scene_args=(expected_variant,),
+    )
