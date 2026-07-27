@@ -1,9 +1,10 @@
-name: "Cinema 4D xa11y Integration Tests"
+name: "Cinema 4D Integration Tests"
 
 on:
   push:
     branches:
       - mainline
+      - redshiftTesting
 
 jobs:
   windows:
