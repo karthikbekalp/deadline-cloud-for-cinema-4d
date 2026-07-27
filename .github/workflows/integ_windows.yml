@@ -38,6 +38,7 @@ jobs:
       g_licenseServerRLM: "127.0.0.1:${{ secrets.RLM_PORT }}"
       g_licenseModel: "LICENSEMODEL::RLM"
       C4D_VERSION: "2026"
+      CINEMA4D_ADAPTOR_TESTING_REDSHIFT_DEVICE: "1"
       INSTALLER_BUCKET: ${{ secrets.INSTALLER_BUCKET }}
       INSTALLER_BUCKET_EXPECTED_OWNER: ${{ secrets.INSTALLER_BUCKET_EXPECTED_OWNER }}
     steps:

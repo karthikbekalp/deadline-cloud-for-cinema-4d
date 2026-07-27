@@ -467,6 +467,13 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
         # If this is a Redshift render, we would want to emit at least error logs
         # For non-Redshift renders this does not print any extra information.
         arguments.extend(["-redshift-log-console", "Error"])
+        # Redshift device preferences are global and cannot be stored in a scene.
+        # This launch override lets workers avoid a problematic device, such as
+        # Device 0 on the GitHub-hosted Windows runners.
+        redshift_device = os.environ.get("CINEMA4D_ADAPTOR_TESTING_REDSHIFT_DEVICE")
+        if redshift_device:
+            arguments.extend(["-redshift-device", redshift_device])
+            _logger.info("Selecting Redshift device %s", redshift_device)
         if "linux" in platform.system().lower():
             _logger.info("Inserting Linux adaptor wrapper script")
             arguments.insert(0, os.path.join(os.path.dirname(__file__), "adaptor.sh"))

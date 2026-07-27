@@ -623,15 +623,6 @@ def _run_integ_case(
     rmtree(actual_dir, ignore_errors=True)
 
 
-# Keep this case running in Windows CI, but do not block the workflow on its
-# known render failure. The other Redshift cases remain required.
-# This is a Cinema 4D issue and we have a ticket with Maxon to add a fix.
-_XFAIL_REDSHIFT_TEXTURED_IN_CI = pytest.mark.xfail(
-    sys.platform == "win32" and os.environ.get("CI") == "true",
-    reason="Redshift textured rendering fails on GitHub-hosted Windows runners",
-    strict=False,
-)
-
 # Standard test cases. Each entry is a folder name under test_cases/ with an
 # input/scene.py (required) and an optional input/configure.py (loaded as the
 # dialog configurator). Parametrized case-specific coverage is registered
@@ -654,7 +645,7 @@ _CASES = [
     "physical_tiles_multi_takes",
     "phy_apos_path",
     "redshift",
-    pytest.param("redshift_textured", marks=_XFAIL_REDSHIFT_TEXTURED_IN_CI),
+    "redshift_textured",
     "redshift_tiles",
 ]
 
