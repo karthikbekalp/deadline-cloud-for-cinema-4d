@@ -4,16 +4,15 @@ from unittest import mock
 
 import yaml
 
-
+from deadline.cinema4d_submitter._yaml_utils import _build_embedded_yaml
 from deadline.cinema4d_submitter.cinema4d_render_submitter import (
-    _get_job_template,
     TakeData,
+    _get_job_template,
     check_take_token_warnings,
     deduplicate_take_names,
-    warn_duplicate_take_names,
     generate_take_parameter_names,
+    warn_duplicate_take_names,
 )
-from deadline.cinema4d_submitter._yaml_utils import _build_embedded_yaml
 from deadline.cinema4d_submitter.data_classes import (
     RenderSubmitterUISettings,
     default_timeout_entries,

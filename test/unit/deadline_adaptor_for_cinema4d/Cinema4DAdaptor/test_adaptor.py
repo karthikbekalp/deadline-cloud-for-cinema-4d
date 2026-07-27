@@ -5,7 +5,6 @@ from __future__ import annotations
 # to run serially on the same worker. This is necessary because all tests share
 # the same Cinema4DAdaptor action queue, which can cause race conditions and
 # test failures when tests run in parallel across multiple workers.
-
 import json
 from pathlib import Path
 from unittest.mock import Mock, PropertyMock, patch
@@ -13,8 +12,8 @@ from unittest.mock import Mock, PropertyMock, patch
 import pytest
 from jsonschema.exceptions import ValidationError
 
-from deadline.cinema4d_adaptor.Cinema4DAdaptor import Cinema4DAdaptor
 from deadline.cinema4d_adaptor._version import version as adaptor_version
+from deadline.cinema4d_adaptor.Cinema4DAdaptor import Cinema4DAdaptor
 
 REFERENCE_INIT_DATA_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -158,15 +157,19 @@ class TestCinema4DAdaptor_errors_on_cleanup:
         [
             (
                 "Redshift Error: Please make sure you have NVIDIA driver 551.78 or later installed.",
-                "Redshift requires NVIDIA driver version 551.78 or later. "
-                "Please update the NVIDIA drivers on your worker fleet. "
-                "Error: Redshift Error: Please make sure you have NVIDIA driver 551.78 or later installed.",
+                (
+                    "Redshift requires NVIDIA driver version 551.78 or later. "
+                    "Please update the NVIDIA drivers on your worker fleet. "
+                    "Error: Redshift Error: Please make sure you have NVIDIA driver 551.78 or later installed."
+                ),
             ),
             (
                 "Redshift Error: Tesla T4 requires driver 551.78 but has 539.64",
-                "The worker has driver 539.64 but Redshift requires 551.78 or later. "
-                "Please update the NVIDIA drivers on your worker fleet. "
-                "Error: Redshift Error: Tesla T4 requires driver 551.78 but has 539.64",
+                (
+                    "The worker has driver 539.64 but Redshift requires 551.78 or later. "
+                    "Please update the NVIDIA drivers on your worker fleet. "
+                    "Error: Redshift Error: Tesla T4 requires driver 551.78 but has 539.64"
+                ),
             ),
         ],
     )

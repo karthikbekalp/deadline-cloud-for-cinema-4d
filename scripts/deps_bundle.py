@@ -6,12 +6,11 @@ import fnmatch
 import re
 import shutil
 import subprocess
-
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from _project import get_project_dict, get_dependencies, Dependency
+from _project import Dependency, get_dependencies, get_project_dict
 
 SUPPORTED_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
 SUPPORTED_PLATFORMS = ["Windows", "Linux", "Darwin"]
@@ -150,7 +149,7 @@ def _get_package_version(package: str, install_path: Path) -> str:
         match = version_regex.match(line)
         if match:
             return match.group(1)
-    raise Exception(f"Could not find version for package {package}")
+    raise RuntimeError(f"Could not find version for package {package}")
 
 
 def _build_base_environment(working_directory: Path, dependencies: list[Dependency]) -> Path:
@@ -206,9 +205,9 @@ def _copy_native_to_base_env(base_env: Path, native_dependency_paths: list[Path]
 
 def _get_zip_path(working_directory: Path, project_dict: dict[str, Any]) -> Path:
     if "project" not in project_dict:
-        raise Exception("pyproject.toml is missing project section")
+        raise ValueError("pyproject.toml is missing project section")
     if "name" not in project_dict["project"]:
-        raise Exception("pyproject.toml is missing name section")
+        raise ValueError("pyproject.toml is missing name section")
     transformed_project_name = (
         f"{project_dict['project']['name'].replace('-', '_')}_submitter-deps.zip"
     )

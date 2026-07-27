@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 import os
 from unittest.mock import Mock, patch
+
 import pytest
+
+from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_client import Cinema4DClient, main
 from openjd.adaptor_runtime_client import (
     PathMappingRule,
 )
-from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_client import Cinema4DClient, main
 
 
 class TestCinema4DClient:

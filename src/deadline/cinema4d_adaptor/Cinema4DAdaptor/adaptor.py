@@ -9,8 +9,8 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
 
 from openjd.adaptor_runtime.adaptors import Adaptor, AdaptorDataValidators, SemanticVersion
 from openjd.adaptor_runtime.adaptors.configuration import AdaptorConfiguration
@@ -122,7 +122,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
         return SemanticVersion(major=0, minor=4)
 
     @staticmethod
-    def _get_timer(timeout: int | float) -> Callable[[], bool]:
+    def _get_timer(timeout: float) -> Callable[[], bool]:
         """
         Given a timeout length, returns a lambda which returns False until the timeout occurs.
 
@@ -606,7 +606,7 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
         }
 
     def on_stop(self) -> None:
-        """ """
+        """Queue an action to close Cinema 4D."""
         self._action_queue.enqueue_action(Action("close"), front=True)
 
     def on_cleanup(self):

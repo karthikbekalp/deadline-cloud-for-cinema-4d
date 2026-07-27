@@ -10,7 +10,7 @@ Cinema 4D submitter.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import xa11y
 from deadline_test_fixtures.xa11y.controls import (

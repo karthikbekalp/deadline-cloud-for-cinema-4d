@@ -1,14 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import List, Optional
 
 from qtpy.QtWidgets import (
     QDialog,
-    QVBoxLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QTextEdit,
+    QVBoxLayout,
 )
 
 from ...style import HEADER_LABEL_STYLE
@@ -21,7 +20,7 @@ class SubmissionWarningDialog(QDialog):
     """
 
     def __init__(
-        self, warnings: List[str], title: str = "Issues Detected", parent: Optional[QDialog] = None
+        self, warnings: list[str], title: str = "Issues Detected", parent: QDialog | None = None
     ):
         super().__init__(parent)
         self.warnings = warnings
@@ -86,7 +85,7 @@ class SubmissionWarningDialog(QDialog):
 
     @staticmethod
     def show_warnings(
-        warnings: List[str], title: str = "Issues Detected", parent: Optional[QDialog] = None
+        warnings: list[str], title: str = "Issues Detected", parent: QDialog | None = None
     ) -> bool:
         """
         Static method to show warnings dialog.

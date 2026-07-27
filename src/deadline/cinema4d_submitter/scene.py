@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Optional, Tuple
 
 import c4d
 
@@ -67,13 +66,13 @@ def _get_renderer_display_name(render_id: int) -> str:
         plugin = c4d.plugins.FindPlugin(render_id, c4d.PLUGINTYPE_VIDEOPOST)
         if plugin:
             return plugin.GetName()
-    except Exception:
+    except Exception:  # noqa: BLE001 - C4D may raise SDK-specific errors during startup
         # FindPlugin may fail if the plugin isn't loaded or C4D is not fully initialized.
-        pass
+        return str(render_id)
     return str(render_id)
 
 
-def get_renderer_warning(render_id: int) -> Optional[str]:
+def get_renderer_warning(render_id: int) -> str | None:
     """
     Returns a warning message for the given renderer ID, or None if no warning is needed.
     """
@@ -230,8 +229,7 @@ class Scene:
                 path, doc=doc, take=take, render_data=render_data
             )
             if not os.path.isabs(xpath):
-                if xpath.startswith("./"):
-                    xpath = xpath[2:]
+                xpath = xpath.removeprefix("./")
                 xpath = os.path.join(doc_path, xpath)
             image_paths.add(os.path.dirname(os.path.normpath(xpath)))
         if render_data[c4d.RDATA_MULTIPASS_SAVEIMAGE]:
@@ -240,8 +238,7 @@ class Scene:
                 path, doc=doc, take=take, render_data=render_data
             )
             if not os.path.isabs(xpath):
-                if xpath.startswith("./"):
-                    xpath = xpath[2:]
+                xpath = xpath.removeprefix("./")
                 xpath = os.path.join(doc_path, xpath)
             image_paths.add(os.path.dirname(os.path.normpath(xpath)))
         return image_paths
@@ -283,7 +280,7 @@ class Scene:
         return c4d.modules.tokensystem.FilenameConvertTokens(path, render_path_data)
 
     @staticmethod
-    def get_output_paths(take=None) -> Tuple[str, str]:
+    def get_output_paths(take=None) -> tuple[str, str]:
         """
         Returns the default and multi-pass output paths.
         """
@@ -299,8 +296,7 @@ class Scene:
                 path, doc=doc, take=take, render_data=render_data
             )
             if not os.path.isabs(xpath):
-                if xpath.startswith("./"):
-                    xpath = xpath[2:]
+                xpath = xpath.removeprefix("./")
                 xpath = os.path.join(doc_path, xpath)
             default_out = os.path.normpath(xpath)
         if render_data[c4d.RDATA_MULTIPASS_SAVEIMAGE]:
@@ -309,8 +305,7 @@ class Scene:
                 path, doc=doc, take=take, render_data=render_data
             )
             if not os.path.isabs(xpath):
-                if xpath.startswith("./"):
-                    xpath = xpath[2:]
+                xpath = xpath.removeprefix("./")
                 xpath = os.path.join(doc_path, xpath)
             multi_out = os.path.normpath(xpath)
         return default_out, multi_out
@@ -323,8 +318,8 @@ class FrameRange:
     """
 
     start: int
-    stop: Optional[int] = None
-    step: Optional[int] = None
+    stop: int | None = None
+    step: int | None = None
 
     def __repr__(self) -> str:
         if self.stop is None or self.stop == self.start:

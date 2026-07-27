@@ -1,7 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import List
-
 
 class WarningCollector:
     """
@@ -9,7 +7,7 @@ class WarningCollector:
     """
 
     def __init__(self):
-        self._warnings: List[str] = []
+        self._warnings: list[str] = []
 
     def add_warning(self, warning_message: str):
         """Add a warning message to the collection."""
@@ -22,7 +20,7 @@ class WarningCollector:
         """Check if any warnings have been collected."""
         return len(self._warnings) > 0
 
-    def get_warnings(self) -> List[str]:
+    def get_warnings(self) -> list[str]:
         """Get all collected warnings."""
         return self._warnings.copy()
 
