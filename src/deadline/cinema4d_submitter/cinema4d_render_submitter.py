@@ -2,13 +2,12 @@
 import logging
 import os
 import re
+import shutil
 import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
-
-import shutil
+from typing import Any
 
 import c4d
 import yaml  # type: ignore[import]
@@ -26,14 +25,13 @@ from deadline.client.ui.dialogs.submit_job_to_deadline_dialog import (  # pylint
 )
 
 from ._version import version_tuple as adaptor_version_tuple
+from ._yaml_utils import _build_embedded_yaml
 from .assets import AssetIntrospector
 from .data_classes import (
     RenderSubmitterUISettings,
 )
 from .detailed_logging_utils import get_detailed_logging_environment
-from .font_utils import scene_has_fonts, get_font_manager_environment, FONTS_DIR
-from .warning_collector import warning_collector
-from .warning_logging_handler import WarningCollectorHandler
+from .font_utils import FONTS_DIR, get_font_manager_environment, scene_has_fonts
 from .platform_utils import is_windows
 from .scene import Animation, Scene, get_renderer_warning
 from .style import C4D_STYLE
@@ -41,8 +39,9 @@ from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
 from .tile_utils import build_assembly_step, build_tile_task_parameters
 from .ui.components import SceneSettingsWidget, SubmissionWarningDialog
-from ._yaml_utils import _build_embedded_yaml
 from .update_utils import check_and_show_update_dialog
+from .warning_collector import warning_collector
+from .warning_logging_handler import WarningCollectorHandler
 
 logger = logging.getLogger(__name__)
 if not any(isinstance(h, WarningCollectorHandler) for h in logger.handlers):
@@ -53,7 +52,7 @@ LOADED = False
 _TAKE_TOKEN = "$take"
 
 
-def _get_release_date() -> Optional[str]:
+def _get_release_date() -> str | None:
     """Safely retrieve release date from _version.py.
 
     Returns:
@@ -73,7 +72,7 @@ class TakeData:
     display_name: str
     renderer_name: str
     ui_group_label: str
-    frames_parameter_name: Optional[str]
+    frames_parameter_name: str | None
     frame_range: str
     output_directories: set[str]
     marked: bool
@@ -113,7 +112,7 @@ def show_submitter():
                 w = _show_submitter(temp_dir, None)
             w.setStyleSheet(C4D_STYLE)
             w.exec_()
-    except Exception:
+    except Exception:  # noqa: BLE001 - prevent UI failures from escaping into Cinema 4D
         print("Deadline UI launch failed")
         import traceback
 
@@ -181,7 +180,7 @@ def _get_parameter_values(
 
     # If we're overriding the adaptor with wheels, remove deadline_cloud_for_cinema4d from the CondaPackages
     if settings.include_adaptor_wheels:
-        conda_param: Optional[JobParameter] = None
+        conda_param: JobParameter | None = None
         # Find the CondaPackages parameter definition
         for param in queue_parameters:
             if param["name"] == "CondaPackages":
@@ -200,6 +199,18 @@ def _get_parameter_values(
     )
 
     return parameter_values
+
+
+def _get_parameter_definition(
+    parameter_definitions: list[dict[str, Any]], name: str
+) -> dict[str, Any]:
+    parameter = next(
+        (item for item in parameter_definitions if item["name"] == name),
+        None,
+    )
+    if parameter is None:
+        raise RuntimeError(f"Template is missing the '{name}' parameter definition")
+    return parameter
 
 
 def _get_job_template(
@@ -230,9 +241,10 @@ def _get_job_template(
     # If there are multiple frame ranges, split up the Frames parameter by take
     if takes[0].frames_parameter_name:
         # Extract the Frames parameter definition
-        frame_param = [
-            param for param in job_template["parameterDefinitions"] if param["name"] == "Frames"
-        ][0]
+        frame_param = _get_parameter_definition(
+            job_template["parameterDefinitions"],
+            "Frames",
+        )
         job_template["parameterDefinitions"] = [
             param for param in job_template["parameterDefinitions"] if param["name"] != "Frames"
         ]
@@ -356,17 +368,15 @@ def _get_job_template(
                 + f"Actual: {wheels_path_package_names}"
             )
 
-        override_adaptor_wheels_param = [
-            param
-            for param in override_environment["parameterDefinitions"]
-            if param["name"] == "OverrideAdaptorWheels"
-        ][0]
+        override_adaptor_wheels_param = _get_parameter_definition(
+            override_environment["parameterDefinitions"],
+            "OverrideAdaptorWheels",
+        )
         override_adaptor_wheels_param["default"] = str(wheels_path)
-        override_adaptor_name_param = [
-            param
-            for param in override_environment["parameterDefinitions"]
-            if param["name"] == "OverrideAdaptorName"
-        ][0]
+        override_adaptor_name_param = _get_parameter_definition(
+            override_environment["parameterDefinitions"],
+            "OverrideAdaptorName",
+        )
         override_adaptor_name_param["default"] = "cinema4d-openjd"
 
         # There are no parameter conflicts between these two templates, so this works
@@ -466,7 +476,7 @@ _STRIPPED_PATH_CHARS = re.compile(r"[|:()\* ]")
 
 def _resolve_take_paths(
     settings: RenderSubmitterUISettings,
-    take_name: Optional[str],
+    take_name: str | None,
     has_take_token: bool,
 ) -> tuple[str, str]:
     """Resolve output_path and multi_pass_path, substituting $take if present.
@@ -571,8 +581,8 @@ def create_job_bundle(
     asset_references: AssetReferences,
     queue_parameters: list[JobParameter],
     attachments: AssetReferences,
-    temp_dir: Optional[str] = None,
-    host_requirements: Optional[dict] = None,
+    temp_dir: str | None = None,
+    host_requirements: dict | None = None,
 ) -> dict[str, Any]:
     """
     Creates a job bundle and saves sticky settings for rendering.
@@ -800,9 +810,9 @@ def setup_auto_detected_attachments(take_data_list: list[TakeData]) -> AssetRefe
     introspector = AssetIntrospector()
 
     # Get scene assets
-    auto_detected_attachments.input_filenames = set(
+    auto_detected_attachments.input_filenames = {
         os.path.normpath(path) for path in introspector.parse_scene_assets()
-    )
+    }
 
     # Add output directories from takes
     for take_data in take_data_list:
@@ -968,7 +978,7 @@ def _show_submitter(temp_dir: str, parent=None, f=Qt.WindowType.Tool):  # type: 
 
     # Create SubmitterInfo with all available metadata
     release_date = _get_release_date()
-    additional_info: Optional[dict[str, Any]] = (
+    additional_info: dict[str, Any] | None = (
         {"release_date": release_date} if release_date else None
     )
 
@@ -987,7 +997,7 @@ def _show_submitter(temp_dir: str, parent=None, f=Qt.WindowType.Tool):  # type: 
         settings: RenderSubmitterUISettings,
         queue_parameters: list[JobParameter],
         asset_references: AssetReferences,
-        host_requirements: Optional[dict[str, Any]] = None,
+        host_requirements: dict[str, Any] | None = None,
         purpose: JobBundlePurpose = JobBundlePurpose.SUBMISSION,
     ) -> dict[str, Any]:
         """

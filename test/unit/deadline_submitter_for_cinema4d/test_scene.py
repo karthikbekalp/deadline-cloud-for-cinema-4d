@@ -1,20 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Optional
 from unittest import mock
 
 import pytest
 
 from deadline.cinema4d_submitter.scene import (
+    THIRD_PARTY_PLUGIN_RENDERERS,
+    UNSUPPORTED_RENDERERS,
+    VERIFIED_RENDERERS,
+    VIEWPORT_RENDERERS,
     Animation,
     FrameRange,
     RendererNames,
     Scene,
     get_renderer_warning,
-    VERIFIED_RENDERERS,
-    THIRD_PARTY_PLUGIN_RENDERERS,
-    UNSUPPORTED_RENDERERS,
-    VIEWPORT_RENDERERS,
 )
 
 
@@ -243,7 +242,7 @@ class TestFrameRange:
         ],
     )
     def test_frame_range_repr(
-        self, start: int, stop: Optional[int], step: Optional[int], expected_string: str
+        self, start: int, stop: int | None, step: int | None, expected_string: str
     ) -> None:
         # GIVEN
         frame_range = FrameRange(start, stop, step)

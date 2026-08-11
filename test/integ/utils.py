@@ -9,7 +9,7 @@ import site
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,13 +25,13 @@ _T0 = time.monotonic()
 
 def log(msg: str) -> None:
     elapsed = time.monotonic() - _T0
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    timestamp = datetime.now(timezone.utc).astimezone().strftime("%H:%M:%S")
     print(f"[integ {timestamp} +{elapsed:6.2f}s] {msg}", flush=True)
 
 
 def run_command(args: list[str]) -> subprocess.CompletedProcess[bytes]:
     print(f"Args list: {args}")
-    output = subprocess.run(args, capture_output=True, stdin=subprocess.DEVNULL)
+    output = subprocess.run(args, capture_output=True, stdin=subprocess.DEVNULL, check=False)
     print(f"\nstdout:\n\n{output.stdout.decode('utf-8', errors='replace')}")
     print(f"\nstderr:\n\n{output.stderr.decode('utf-8', errors='replace')}")
     assert output.returncode == 0, f"Failed to run command {args}"

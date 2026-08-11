@@ -5,9 +5,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from shutil import copy2, rmtree
-from typing import Callable, Optional
 
 import pytest
 import xa11y
@@ -20,6 +20,7 @@ from deadline_test_fixtures.xa11y import (
     SharedSubmitterDialog,
     find_accessibility_app,
 )
+
 from .utils import (
     assert_all_images_close,
     assert_expected_job_bundle_and_generated_job_bundle_are_equal,
@@ -214,15 +215,15 @@ def _dump_dialog_discovery_failure(app) -> None:
     try:
         log("Cinema 4D app tree:")
         print(app.dump())
-    except Exception:
+    except Exception as e:  # noqa: BLE001 - diagnostics must not mask the original failure
         # Best-effort diagnostics; the dump itself failing must not mask the
         # original failure this function is reporting.
-        pass
+        log(f"Cinema 4D app tree dump failed: {e!r}")
     try:
         log("All running apps:")
         for a in xa11y.App.list():
             print(f"  - {a.name!r} (pid={a.pid})")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - diagnostics must not mask the original failure
         log(f"App.list() failed: {e!r}")
 
 
@@ -271,7 +272,7 @@ def _resolve_dialog_app(proc: subprocess.Popen):
     try:
         log("dialog app tree (depth=8):")
         print(dialog_app.dump(max_depth=8))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - diagnostics must not fail dialog discovery
         log(f"dialog_app.dump() failed: {e!r}")
 
     return dialog_app
@@ -293,10 +294,10 @@ def _wait_for_submitter_dialog(dialog_app):
         log("dialog selector failed; final tree:")
         try:
             print(dialog_app.dump())
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - preserve the original dialog error
             # Best-effort diagnostic dump; if it fails we still re-raise the
             # original error below.
-            pass
+            log(f"Final dialog tree dump failed: {e!r}")
         raise
     log("submitter dialog visible")
     return dialog
@@ -319,7 +320,7 @@ def _wait_for_queue_environment_loading(dialog_app) -> None:
     try:
         loading.wait_hidden(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
         log("queue environment loading finished (loading caption hidden)")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - this readiness check is intentionally non-fatal
         log(f"loading-text wait failed (non-fatal): {e!r}")
 
 
@@ -337,10 +338,10 @@ def _press_export_bundle(dialog, dialog_app) -> None:
         log("Export bundle press failed; final dialog tree:")
         try:
             print(dialog_app.dump())
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - preserve the original export error
             # Best-effort diagnostic dump; if it fails we still re-raise the
             # original error below.
-            pass
+            log(f"Final dialog tree dump failed: {e!r}")
         raise
 
 
@@ -382,7 +383,7 @@ def _dismiss_success_popup(pid: int) -> None:
                     ok.press()
                     log("success popup dismissed (OK)")
                     return
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - polling retries transient accessibility errors
             log(f"success-popup scan raised (retrying): {e!r}")
         time.sleep(0.25)
     log("success popup not found within 5s (non-fatal, bundle already exported)")
@@ -403,7 +404,7 @@ def _dump_settings_tabs(dialog) -> None:
         try:
             ui.switch_to_tab(dialog, tab)
             print(dialog.element().dump(max_depth=15))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - this diagnostic dump is best-effort
             log(f"dump of {tab!r} failed: {e!r}")
         log(f"=== DIALOG_DUMP: end {tab} tab ===")
 
@@ -420,7 +421,7 @@ def _copy_bundle_files(staged_bundle: Path, dest: Path) -> None:
 def _drive_submitter_ui(
     proc: subprocess.Popen,
     history_dir: Path,
-    configure: Optional[DialogConfigurator] = None,
+    configure: DialogConfigurator | None = None,
 ) -> Path:
     """Drive the running submitter dialog via xa11y and return the exported
     bundle directory.
@@ -470,7 +471,7 @@ def _export_job_bundle_via_submitter(
     scene_path: Path,
     job_bundle_generated: Path,
     deadline_farm: dict,
-    configure: Optional[DialogConfigurator] = None,
+    configure: DialogConfigurator | None = None,
 ) -> None:
     """Launch Cinema 4D, drive the real submitter UI to export a job bundle,
     and copy the bundle files flat into `job_bundle_generated`.
@@ -506,8 +507,8 @@ def _export_job_bundle_via_submitter(
 
 def _load_configurator(
     case: str,
-    configure_kwargs: Optional[dict[str, str]] = None,
-) -> Optional[DialogConfigurator]:
+    configure_kwargs: dict[str, str] | None = None,
+) -> DialogConfigurator | None:
     """Load a case's optional input/configure.py and return its `configure`
     callable, or None if the case has no configurator.
 
@@ -534,7 +535,7 @@ def _load_configurator(
     spec.loader.exec_module(module)
     configure = getattr(module, "configure", None)
     if not callable(configure):
-        raise AttributeError(f"{config_path} must define a top-level configure(dialog) function")
+        raise TypeError(f"{config_path} must define a top-level configure(dialog) function")
     if configure_kwargs:
         return lambda dialog: configure(dialog, **configure_kwargs)
     return configure
@@ -546,8 +547,8 @@ def _run_integ_case(
     deadline_farm: dict,
     case: str,
     *,
-    expected_variant: Optional[str] = None,
-    configure_kwargs: Optional[dict[str, str]] = None,
+    expected_variant: str | None = None,
+    configure_kwargs: dict[str, str] | None = None,
     scene_args: tuple[str, ...] = (),
 ) -> None:
     """Build, export, validate, and optionally render one case configuration."""

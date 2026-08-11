@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import time
 import traceback
-from typing import Any, Callable, Dict
+from collections.abc import Callable
+from typing import Any
 
 # The Cinema4D Adaptor adds the `deadline` namespace directory to PYTHONPATH,
 # so that importing just the cinema4d_adaptor should work.
@@ -69,12 +70,12 @@ def progress_callback(progress_percent, progress_type_int):
     print(f"Progress update ({progress_type_text}): {min(progress_percent * 100.0, 100.0)}%")
 
     if progress_type_int == c4d.RENDERPROGRESSTYPE_DURINGRENDERING:
-        print("ALF_PROGRESS %g" % min(progress_percent * 100, 100))
+        print(f"ALF_PROGRESS {min(progress_percent * 100, 100):g}")
 
 
 class Cinema4DHandler:
-    action_dict: Dict[str, Callable[[Dict[str, Any]], None]] = {}
-    render_kwargs: Dict[str, Any]
+    action_dict: dict[str, Callable[[dict[str, Any]], None]]
+    render_kwargs: dict[str, Any]
     map_path: Callable[[str], str]
 
     C4D_FONT_INDEX = c4d.DescID(
@@ -106,7 +107,7 @@ class Cinema4DHandler:
         Asset references in the .c4d files are not automatically re-mapped if they are
         absolute paths. This function remaps the asset references to the new paths.
         """
-        asset_list: list[Dict[str, Any]] = []
+        asset_list: list[dict[str, Any]] = []
         c4d.documents.GetAllAssetsNew(
             self.doc, allowDialogs=False, lastPath="", assetList=asset_list
         )
@@ -137,7 +138,7 @@ class Cinema4DHandler:
                     attempted_basic_path_mapping_approach = True
                     owner[param_id] = mapped_path
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - continue remapping independent scene assets
                 print(
                     f"WARNING: asset with asset owner '{owner}', asset paramId {param_id}, filename "
                     f"'{filename}', nodeSpace '{node_space}', and nodePath '{node_path}' could not be path "
@@ -149,7 +150,7 @@ class Cinema4DHandler:
                     )
                     try:
                         owner[param_id] = mapped_path
-                    except Exception as f:
+                    except Exception as f:  # noqa: BLE001 - C4D owners expose varying setters
                         print(
                             f"{owner}[{param_id}] = {mapped_path} failed. Error: {f} {traceback.format_exc()}"
                         )
@@ -273,9 +274,9 @@ class Cinema4DHandler:
         """Raise if a RenderDocument result is an error (or unrecognized)."""
         result_description = _RENDERRESULT.get(result)
         if result_description is None:
-            raise RuntimeError("Error: unhandled render result: %s" % result)
+            raise RuntimeError(f"Error: unhandled render result: {result}")
         if result != c4d.RENDERRESULT_OK:
-            raise RuntimeError("Error: render result: %s" % result_description)
+            raise RuntimeError(f"Error: render result: {result_description}")
 
     def start_render(self, data: dict) -> None:
         if self.cached_text_was_used_in_previous_frame:
@@ -430,7 +431,7 @@ class Cinema4DHandler:
                 break
 
         if matched_take is None:
-            raise RuntimeError("Take not found: %s" % take_name)
+            raise RuntimeError(f"Take not found: {take_name}")
 
         take_data.SetCurrentTake(matched_take)
 

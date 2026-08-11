@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 from types import FrameType
-from typing import Optional
 
 # The Cinema4D Adaptor adds the `openjd` namespace directory to PYTHONPATH,
 # so that importing just the adaptor_runtime_client should work.
@@ -37,14 +36,14 @@ class Cinema4DClient(ClientInterface):
         super().__init__(server_path=server_path)
         self.actions.update(Cinema4DHandler(lambda path: self.map_path(path)).action_dict)
 
-    def close(self, args: Optional[dict] = None) -> None:
+    def close(self, args: dict | None = None) -> None:
         sys.exit(0)
 
     def graceful_shutdown(self, signum: int, frame: FrameType | None):
         sys.exit(0)
 
     def map_path(self, path: str) -> str:
-        """
+        r"""
         Maps a path using the path mapping rules from the server.
 
         When submitting jobs from Mac, Cinema 4D's c4d.GetAllAssetsNew() API can sometimes return paths
@@ -112,8 +111,8 @@ class Cinema4DClient(ClientInterface):
             print(f"Successfully mapped converted path: '{converted_path}' -> '{mapped_path}'")
             return mapped_path
 
-        except Exception as e:
-            print(f"Error during path mapping: {str(e)}")
+        except Exception as e:  # noqa: BLE001 - C4D path rules can raise SDK-specific errors
+            print(f"Error during path mapping: {e!s}")
             # If anything goes wrong, fall back to parent implementation with original path
             return super().map_path(path)
 

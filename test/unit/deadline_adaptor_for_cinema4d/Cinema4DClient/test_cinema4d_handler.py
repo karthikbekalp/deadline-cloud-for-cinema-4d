@@ -1,10 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-from unittest.mock import Mock, MagicMock, patch
-import pytest
-from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler import Cinema4DHandler
-from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler import progress_callback
-from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler import USE_CACHED_TEXT_KEY
+from unittest.mock import MagicMock, Mock, patch
+
 import c4d
+import pytest
+
+from deadline.cinema4d_adaptor.Cinema4DClient.cinema4d_handler import (
+    USE_CACHED_TEXT_KEY,
+    Cinema4DHandler,
+    progress_callback,
+)
 
 
 def mock_map_path(path: str):

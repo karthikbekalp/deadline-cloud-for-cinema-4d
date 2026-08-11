@@ -1,12 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-import pytest
 import os
 import site
 import sys
-
 from pathlib import Path
 
+import pytest
 from deadline_test_fixtures.deadline_mock import (
     MockDeadlineScenario,
     MockDeadlineServerProcess,
@@ -49,7 +48,7 @@ def cinema4d_location() -> Path:
     version = os.environ.setdefault("C4D_VERSION", _DEFAULT_C4D_VERSION)
     if version not in _C4D_DEFAULT_PATHS:
         supported_versions = ", ".join(_C4D_DEFAULT_PATHS)
-        raise EnvironmentError(
+        raise OSError(
             f"Unsupported Cinema 4D version {version!r}. "
             f"Supported versions: {supported_versions}."
         )
@@ -63,7 +62,7 @@ def cinema4d_location() -> Path:
         os.environ["C4D_LOCATION"] = str(default_path)
         return default_path
 
-    raise EnvironmentError(
+    raise OSError(
         f"Cinema 4D {version} location not found. "
         "This test runs on Windows and macOS only. "
         "Set C4D_LOCATION to override the install directory."

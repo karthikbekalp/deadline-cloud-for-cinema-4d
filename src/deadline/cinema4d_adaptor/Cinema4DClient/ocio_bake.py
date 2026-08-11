@@ -52,7 +52,7 @@ def _resolve_render_path(doc: Any, render_data: Any, render_bc: Any, frame: int,
     }
     try:
         return tokensystem.FilenameConvertTokens(path, rp_data)
-    except Exception:
+    except Exception:  # noqa: BLE001 - token conversion failures must preserve the original path
         return path
 
 

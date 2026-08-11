@@ -71,7 +71,7 @@ C4D_INSTALL_PATHS = {
 def run(cmd, check=True):
     """Run a shell command, exiting on failure if check is True."""
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, check=False)
     if check and result.returncode != 0:
         sys.exit(result.returncode)
     return result
@@ -170,6 +170,7 @@ def setup_windows(versions):
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             print(f"Installer exit code: {result.returncode}")
             print(f"Installer stdout: {result.stdout}")
@@ -275,6 +276,7 @@ def setup_macos(versions):
             ],
             stdin=subprocess.DEVNULL,
             timeout=600,
+            check=False,
         )
         print(f"Installer exit code: {result.returncode}")
 
@@ -333,9 +335,8 @@ def _configure_rlm_licensing(versions, platform_key):
             # write to a temp file first then sudo cp it into place.
             import tempfile
 
-            tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
-            tmp.write(new_content)
-            tmp.close()
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as tmp:
+                tmp.write(new_content)
             run(["sudo", "cp", tmp.name, str(config_txt)])
             os.unlink(tmp.name)
         else:
