@@ -145,7 +145,7 @@ def _find_fonts_scene_based(scene_file_path: str) -> set[str]:
         logger.info(f"Found {len(fonts)} fonts in scene-based {FONTS_DIR} directory")
         return fonts
 
-    except OSError as e:
+    except (OSError, TypeError) as e:
         logger.warning(f"Error accessing scene file path for font location: {e}")
         return set()
 

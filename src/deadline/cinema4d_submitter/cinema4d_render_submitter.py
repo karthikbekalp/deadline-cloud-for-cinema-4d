@@ -201,6 +201,18 @@ def _get_parameter_values(
     return parameter_values
 
 
+def _get_parameter_definition(
+    parameter_definitions: list[dict[str, Any]], name: str
+) -> dict[str, Any]:
+    parameter = next(
+        (item for item in parameter_definitions if item["name"] == name),
+        None,
+    )
+    if parameter is None:
+        raise RuntimeError(f"Template is missing the '{name}' parameter definition")
+    return parameter
+
+
 def _get_job_template(
     settings: RenderSubmitterUISettings,
     renderers: set[str],
@@ -229,8 +241,9 @@ def _get_job_template(
     # If there are multiple frame ranges, split up the Frames parameter by take
     if takes[0].frames_parameter_name:
         # Extract the Frames parameter definition
-        frame_param = next(
-            param for param in job_template["parameterDefinitions"] if param["name"] == "Frames"
+        frame_param = _get_parameter_definition(
+            job_template["parameterDefinitions"],
+            "Frames",
         )
         job_template["parameterDefinitions"] = [
             param for param in job_template["parameterDefinitions"] if param["name"] != "Frames"
@@ -355,16 +368,14 @@ def _get_job_template(
                 + f"Actual: {wheels_path_package_names}"
             )
 
-        override_adaptor_wheels_param = next(
-            param
-            for param in override_environment["parameterDefinitions"]
-            if param["name"] == "OverrideAdaptorWheels"
+        override_adaptor_wheels_param = _get_parameter_definition(
+            override_environment["parameterDefinitions"],
+            "OverrideAdaptorWheels",
         )
         override_adaptor_wheels_param["default"] = str(wheels_path)
-        override_adaptor_name_param = next(
-            param
-            for param in override_environment["parameterDefinitions"]
-            if param["name"] == "OverrideAdaptorName"
+        override_adaptor_name_param = _get_parameter_definition(
+            override_environment["parameterDefinitions"],
+            "OverrideAdaptorName",
         )
         override_adaptor_name_param["default"] = "cinema4d-openjd"
 

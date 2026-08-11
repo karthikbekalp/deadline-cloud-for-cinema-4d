@@ -43,12 +43,12 @@ class Cinema4DClient(ClientInterface):
         sys.exit(0)
 
     def map_path(self, path: str) -> str:
-        """
+        r"""
         Maps a path using the path mapping rules from the server.
 
         When submitting jobs from Mac, Cinema 4D's c4d.GetAllAssetsNew() API can sometimes return paths
         with backslashes ('\') instead of forward slashes ('/'). For example, it might return
-        '\\path\to\file\\my_attachments' instead of the expected '/path/to/file/my_attachments'.
+        '\path\to\file\my_attachments' instead of the expected '/path/to/file/my_attachments'.
 
         To handle this, when running on Windows with posix source path format, we convert any backslashes
         to forward slashes before applying path mapping rules. This is safe because Windows accepts both

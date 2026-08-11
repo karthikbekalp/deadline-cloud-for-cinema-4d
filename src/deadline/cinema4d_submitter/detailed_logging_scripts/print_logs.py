@@ -192,7 +192,7 @@ def _scan_for_bug_reports(base_path: str, dir_prefix: str) -> list[str]:
             if bugreports_dir.exists() and (bugreports_dir / "_BugReport.txt").exists()
         ]
         return bug_reports
-    except OSError as e:
+    except Exception as e:  # noqa: BLE001 - log discovery is best-effort
         print(f"Error scanning for bug reports: {e}")
         return []
 
@@ -280,7 +280,7 @@ def print_log_file(log_file, log_type="LOG") -> None:
     try:
         with open(log_file, "r", encoding="utf-8", errors="replace") as f:
             print(f.read())
-    except OSError as e:
+    except Exception as e:  # noqa: BLE001 - log output must not fail the task
         print(f"Error reading log file {log_file}: {type(e).__name__}: {e}")
         return
 
