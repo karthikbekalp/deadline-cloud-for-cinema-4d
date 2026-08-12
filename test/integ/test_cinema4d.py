@@ -281,6 +281,7 @@ def _find_submitter_app_while_process_runs(
 ) -> xa11y.App:
     """Wait for the submitter UIA app while also monitoring Cinema 4D."""
     deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
 
     while time.monotonic() < deadline:
         try:
@@ -292,7 +293,8 @@ def _find_submitter_app_while_process_runs(
                 ),
                 None,
             )
-        except Exception:  # noqa: BLE001 - providers can fail transiently during startup
+        except Exception as error:  # noqa: BLE001 - providers can fail during startup
+            last_error = error
             app = None
         if app is not None:
             return app
@@ -308,10 +310,13 @@ def _find_submitter_app_while_process_runs(
             )
         time.sleep(0.25)
 
-    raise TimeoutError(
+    message = (
         f"No accessibility app appeared for PID {proc.pid} "
         f"and name prefix {_DIALOG_NAME_PREFIX!r}"
     )
+    if last_error is not None:
+        message += f" (last App.list() error: {last_error!r})"
+    raise TimeoutError(message)
 
 
 def _resolve_dialog_app(proc: subprocess.Popen):
@@ -575,21 +580,25 @@ def _export_job_bundle_via_submitter(
     the C4D subprocess), so the bundle lands under that dir; we then copy its
     files flat into `job_bundle_generated` for validation.
 
-    If Cinema 4D exits before its submitter accessibility app appears, launch
-    it once more. Owns all cleanup: each C4D subprocess is killed and its
-    diagnostic log echoed before the staging dir is removed, even on failure.
+    On Windows, if Cinema 4D exits before its submitter accessibility app
+    appears, launch it once more. Owns all cleanup: each C4D subprocess is
+    killed and its diagnostic log echoed before the staging dir is removed,
+    even on failure.
     """
     cinema4d_gui_exe = resolve_c4d_exe(cinema4d_location, "Cinema 4D")
 
     history_dir = deadline_farm["job_history_dir"]
     bundle_staging = Path(tempfile.mkdtemp(prefix="c4d-submitter-ui-"))
-    plugin_diag_log = bundle_staging / "plugin-diag.log"
     log(f"bundle staging dir: {bundle_staging}; job history dir: {history_dir}")
     try:
-        env = _build_launch_env(
-            scene_path, plugin_diag_log, deadline_farm["env_overlay"], extra_env=extra_env
-        )
         for attempt in range(2):
+            plugin_diag_log = bundle_staging / f"plugin-diag-{attempt + 1}.log"
+            env = _build_launch_env(
+                scene_path,
+                plugin_diag_log,
+                deadline_farm["env_overlay"],
+                extra_env=extra_env,
+            )
             proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
             try:
                 staged_bundle = _drive_submitter_ui(proc, history_dir, configure=configure)
