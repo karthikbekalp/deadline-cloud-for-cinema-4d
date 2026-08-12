@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from shutil import copy2, rmtree
@@ -75,6 +76,10 @@ _SCENE_RELATIVE_PATHS = {
 # Whatever a configurator changes must be reflected in that scene's
 # expected/job_bundle/, since the golden comparison is exact.
 DialogConfigurator = Callable[[xa11y.Locator], None]
+
+
+class _Cinema4DStartupError(RuntimeError):
+    """Cinema 4D exited before its submitter accessibility app appeared."""
 
 
 def _prepend(new: str, existing: str, sep: str) -> str:
@@ -270,6 +275,45 @@ def _dump_dialog_discovery_failure(app) -> None:
         log(f"App.list() failed: {e!r}")
 
 
+def _find_submitter_app_while_process_runs(
+    proc: subprocess.Popen,
+    timeout: float,
+) -> xa11y.App:
+    """Wait for the submitter UIA app while also monitoring Cinema 4D."""
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        try:
+            app = next(
+                (
+                    app
+                    for app in xa11y.App.list()
+                    if app.pid == proc.pid and app.name and app.name.startswith(_DIALOG_NAME_PREFIX)
+                ),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - providers can fail transiently during startup
+            app = None
+        if app is not None:
+            return app
+
+        # Check after the app scan so an app registered at the same instant the
+        # process exits is not incorrectly reported as a startup crash.
+        returncode = proc.poll()
+        if returncode is not None:
+            unsigned_returncode = returncode & 0xFFFFFFFF
+            raise _Cinema4DStartupError(
+                "Cinema 4D exited before its accessibility app appeared "
+                f"(exit code {returncode} / 0x{unsigned_returncode:08X})"
+            )
+        time.sleep(0.25)
+
+    raise TimeoutError(
+        f"No accessibility app appeared for PID {proc.pid} "
+        f"and name prefix {_DIALOG_NAME_PREFIX!r}"
+    )
+
+
 def _resolve_dialog_app(proc: subprocess.Popen):
     """Attach xa11y to the launched Cinema 4D process and return the
     accessibility app that hosts the submitter dialog.
@@ -281,13 +325,13 @@ def _resolve_dialog_app(proc: subprocess.Popen):
         app sharing the C4D pid.
       - macOS AX: dialogs are child windows of the host app.
     """
-    log(f"waiting up to {_C4D_BOOT_TIMEOUT_S:.0f}s for xa11y to attach by pid")
     if sys.platform == "win32":
+        app_timeout = _C4D_BOOT_TIMEOUT_S + _DIALOG_VISIBLE_TIMEOUT_S
+        log(f"waiting up to {app_timeout:.0f}s for the submitter UIA app")
         try:
-            dialog_app = find_accessibility_app(
-                proc.pid,
-                timeout=_C4D_BOOT_TIMEOUT_S + _DIALOG_VISIBLE_TIMEOUT_S,
-                name_prefix=_DIALOG_NAME_PREFIX,
+            dialog_app = _find_submitter_app_while_process_runs(
+                proc,
+                timeout=app_timeout,
             )
         except TimeoutError:
             try:
@@ -304,6 +348,7 @@ def _resolve_dialog_app(proc: subprocess.Popen):
         log(f"submitter dialog UIA app: {dialog_app.name!r}")
     else:
         # On macOS the dialog is a child window of the C4D app.
+        log(f"waiting up to {_C4D_BOOT_TIMEOUT_S:.0f}s for xa11y to attach by pid")
         dialog_app = find_accessibility_app(
             proc.pid,
             timeout=_C4D_BOOT_TIMEOUT_S,
@@ -530,8 +575,9 @@ def _export_job_bundle_via_submitter(
     the C4D subprocess), so the bundle lands under that dir; we then copy its
     files flat into `job_bundle_generated` for validation.
 
-    Owns all cleanup: the C4D subprocess is always killed and its diagnostic
-    log echoed before the staging dir is removed, even on failure.
+    If Cinema 4D exits before its submitter accessibility app appears, launch
+    it once more. Owns all cleanup: each C4D subprocess is killed and its
+    diagnostic log echoed before the staging dir is removed, even on failure.
     """
     cinema4d_gui_exe = resolve_c4d_exe(cinema4d_location, "Cinema 4D")
 
@@ -543,13 +589,23 @@ def _export_job_bundle_via_submitter(
         env = _build_launch_env(
             scene_path, plugin_diag_log, deadline_farm["env_overlay"], extra_env=extra_env
         )
-        proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
-        try:
-            staged_bundle = _drive_submitter_ui(proc, history_dir, configure=configure)
-            _copy_bundle_files(staged_bundle, job_bundle_generated)
-        finally:
-            kill_proc(proc)
-            _dump_plugin_diag_log(plugin_diag_log)
+        for attempt in range(2):
+            proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
+            try:
+                staged_bundle = _drive_submitter_ui(proc, history_dir, configure=configure)
+                _copy_bundle_files(staged_bundle, job_bundle_generated)
+                return
+            except _Cinema4DStartupError as error:
+                if attempt == 1:
+                    raise
+                warnings.warn(
+                    f"{error}; restarting Cinema 4D once",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            finally:
+                kill_proc(proc)
+                _dump_plugin_diag_log(plugin_diag_log)
     finally:
         rmtree(bundle_staging, ignore_errors=True)
         log(f"removed staging dir: {bundle_staging}")
