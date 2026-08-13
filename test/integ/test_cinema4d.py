@@ -284,6 +284,18 @@ def _find_submitter_app_while_process_runs(
     last_error: Exception | None = None
 
     while time.monotonic() < deadline:
+        # Avoid entering Windows UIA after C4D has already exited. Enumerating
+        # every top-level app can block on an unresponsive accessibility
+        # provider, which would prevent both this process check and the outer
+        # startup timeout from running.
+        returncode = proc.poll()
+        if returncode is not None:
+            unsigned_returncode = returncode & 0xFFFFFFFF
+            raise _Cinema4DStartupError(
+                "Cinema 4D exited before its accessibility app appeared "
+                f"(exit code {returncode} / 0x{unsigned_returncode:08X})"
+            )
+
         try:
             app = next(
                 (
@@ -299,15 +311,6 @@ def _find_submitter_app_while_process_runs(
         if app is not None:
             return app
 
-        # Check after the app scan so an app registered at the same instant the
-        # process exits is not incorrectly reported as a startup crash.
-        returncode = proc.poll()
-        if returncode is not None:
-            unsigned_returncode = returncode & 0xFFFFFFFF
-            raise _Cinema4DStartupError(
-                "Cinema 4D exited before its accessibility app appeared "
-                f"(exit code {returncode} / 0x{unsigned_returncode:08X})"
-            )
         time.sleep(0.25)
 
     message = (
@@ -599,7 +602,9 @@ def _export_job_bundle_via_submitter(
                 deadline_farm["env_overlay"],
                 extra_env=extra_env,
             )
+            log(f"launching Cinema 4D (attempt {attempt + 1}/2)")
             proc = _launch_cinema4d(cinema4d_gui_exe, scene_path, env)
+            log(f"Cinema 4D launched (attempt {attempt + 1}/2, pid={proc.pid})")
             try:
                 staged_bundle = _drive_submitter_ui(proc, history_dir, configure=configure)
                 _copy_bundle_files(staged_bundle, job_bundle_generated)

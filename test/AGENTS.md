@@ -280,13 +280,13 @@ macOS. All six jobs run in parallel. Local runs default to Cinema 4D 2026.
 Set `C4D_VERSION` for an older version and set `C4D_LOCATION` only when its
 installation is outside that version's default path.
 
-The `integ:test` script hardcodes the `test/integ` path and
-`--numprocesses=1`. Beware: any args you pass *replace* the path (hatch
-`{args:test/integ}` falls back to the global `testpaths = ["test"]`), so
-`hatch run integ:test -k physical` would scan the whole `test/` tree. To
-filter or run in-process (e.g. to see C4D/xa11y stdout, which xdist hides), call
-pytest directly with an explicit path — the test spawns its own subprocesses
-regardless of `--numprocesses`:
+The `integ:test` script runs in-process with output capture disabled so C4D and
+xa11y progress reaches CI as it happens. If one test runs for 10 minutes, pytest
+dumps all Python thread stacks and exits instead of waiting for the CI job
+timeout. Beware: any args you pass *replace* the `test/integ` path (hatch
+`{args:test/integ}` falls back to the global `testpaths = ["test"]`), so `hatch
+run integ:test -k physical` would scan the whole `test/` tree. To filter, call
+pytest with an explicit path:
 
 ```bash
 hatch -e integ run pytest --no-cov test/integ/test_cinema4d.py \

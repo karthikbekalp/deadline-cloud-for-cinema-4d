@@ -43,7 +43,7 @@ pre-install-commands = [
 PYTHONIOENCODING = "utf-8"
 
 [envs.integ.scripts]
-test = "pytest --no-cov {args:test/integ} -vvv --numprocesses=1"
+test = "pytest --no-cov {args:test/integ} -vvv --numprocesses=0 -s -o faulthandler_timeout=600 -o faulthandler_exit_on_timeout=true"
 
 [envs.installer.scripts]
 build-installer = "python {root}/scripts/build_installer_cli.py --installer-source-path {root}/installer/DeadlineCloudForCinema4dSubmitter.xml {args:}"

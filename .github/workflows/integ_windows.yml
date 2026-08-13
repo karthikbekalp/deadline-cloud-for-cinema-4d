@@ -109,35 +109,86 @@ jobs:
             --query 'Reservations[0].Instances[0].InstanceId' `
             --profile license --region $region --output text).Trim()
           if (-not $bastion -or $bastion -eq "None") { Write-Error "Bastion host not found"; exit 1 }
+          Write-Host "::add-mask::$bastion"
 
           # Start SSM port forwarding to the bastion (params via file to avoid
-          # quoting issues). Redirect stdout to a log file so we can capture
-          # the SessionId for deterministic teardown.
+          # quoting issues). Retry the complete session once because a failed
+          # AWS CLI process cannot recover through additional local port probes.
           $paramsFile = Join-Path $env:RUNNER_TEMP "ssm_params.json"
           @{portNumber=@($rlmPort);localPortNumber=@($rlmPort)} | ConvertTo-Json -Compress | Out-File -FilePath $paramsFile -Encoding ascii
-          $ssmLog = Join-Path $env:RUNNER_TEMP "ssm.log"
-          Start-Process -FilePath "aws" -ArgumentList "ssm start-session --target $bastion --document-name DccInteg-PortForwardToLicenseServer --parameters file://$paramsFile --profile license --region $region" -NoNewWindow -RedirectStandardOutput $ssmLog
-
-          # Wait for port (retry up to 60s)
           $ready = $false
-          for ($i = 0; $i -lt 12; $i++) {
-            Start-Sleep -Seconds 5
-            $t = Test-NetConnection -ComputerName 127.0.0.1 -Port $rlmPort -WarningAction SilentlyContinue
-            if ($t.TcpTestSucceeded) { $ready = $true; break }
-          }
-          if (-not $ready) { Write-Error "SSM port forward not up after 30s"; if (Test-Path $ssmLog) { Get-Content $ssmLog }; exit 1 }
-          Write-Host "License tunnel up via SSM"
-
-          # Capture the SSM session id so the teardown step can terminate the
-          # session on the (shared, long-lived) license host explicitly, rather
-          # than relying on SSM's disconnect detection to reap it.
           $ssmSessionId = ""
-          if (Test-Path $ssmLog) {
-            $m = Select-String -Path $ssmLog -Pattern 'SessionId: ([A-Za-z0-9._-]+)' | Select-Object -First 1
-            if ($m) { $ssmSessionId = $m.Matches[0].Groups[1].Value }
+          $lastStatus = "not started"
+
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            $ssmOutLog = Join-Path $env:RUNNER_TEMP "ssm-$attempt.out.log"
+            $ssmErrLog = Join-Path $env:RUNNER_TEMP "ssm-$attempt.err.log"
+            Write-Host "Starting SSM port forward (attempt $attempt/2)"
+            $ssmProcess = Start-Process -FilePath "aws" `
+              -ArgumentList "ssm start-session --target $bastion --document-name DccInteg-PortForwardToLicenseServer --parameters file://$paramsFile --profile license --region $region" `
+              -NoNewWindow -PassThru `
+              -RedirectStandardOutput $ssmOutLog -RedirectStandardError $ssmErrLog
+
+            # Wait up to 30 seconds for the local listener.
+            for ($i = 0; $i -lt 6; $i++) {
+              Start-Sleep -Seconds 5
+              if ($ssmProcess.HasExited) { break }
+              $client = [System.Net.Sockets.TcpClient]::new()
+              try {
+                $client.Connect("127.0.0.1", [int]$rlmPort)
+                $ready = $true
+                break
+              } catch {
+                # The listener is not ready yet.
+              } finally {
+                $client.Dispose()
+              }
+            }
+
+            # Capture and mask the session id. It is retained for teardown but
+            # never printed in the public workflow log.
+            $attemptSessionId = ""
+            if (Test-Path $ssmOutLog) {
+              $m = Select-String -Path $ssmOutLog -Pattern 'SessionId: ([A-Za-z0-9._-]+)' | Select-Object -First 1
+              if ($m) {
+                $attemptSessionId = $m.Matches[0].Groups[1].Value
+                Write-Host "::add-mask::$attemptSessionId"
+              }
+            }
+
+            if ($ready) {
+              $ssmSessionId = $attemptSessionId
+              break
+            }
+
+            $lastStatus = if ($ssmProcess.HasExited) { "exit code $($ssmProcess.ExitCode)" } else { "process still running" }
+            Write-Warning "SSM attempt $attempt/2 did not open the local port ($lastStatus)"
+
+            # Tear down a partial session before retrying.
+            if ($attemptSessionId) {
+              aws ssm terminate-session --session-id $attemptSessionId --profile license --region $region 2>$null | Out-Null
+              $global:LASTEXITCODE = 0
+            }
+            if (-not $ssmProcess.HasExited) {
+              Stop-Process -Id $ssmProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+            Get-Process -Name "session-manager-plugin" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+            if ($attempt -lt 2) {
+              Write-Host "Retrying SSM port forward in 5 seconds"
+              Start-Sleep -Seconds 5
+            }
           }
+
           "SSM_SESSION_ID=$ssmSessionId" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          if ($ssmSessionId) { Write-Host "SSM session id: $ssmSessionId" } else { Write-Host "SSM session id: <not captured>" }
+
+          if (-not $ready) {
+            Write-Error "SSM port forward failed after 2 attempts ($lastStatus)"
+            exit 1
+          }
+
+          Write-Host "License tunnel up via SSM"
+          if ($ssmSessionId) { Write-Host "SSM session id captured for teardown" } else { Write-Host "SSM session id was not captured" }
 
           hatch run integ:test
 
