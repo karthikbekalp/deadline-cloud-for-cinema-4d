@@ -14,7 +14,15 @@ from _project import Dependency, get_dependencies, get_project_dict
 
 SUPPORTED_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13"]
 SUPPORTED_PLATFORMS = ["Windows", "Linux", "Darwin"]
-NATIVE_DEPENDENCIES = ["xxhash", "psutil"]
+# Packages with compiled extension modules, fetched once per supported Python version so the
+# bundle carries a loadable artifact for each interpreter.
+#
+# awscrt is here because its wheels are not uniformly abi3: Python 3.10 gets
+# _awscrt.cpython-310-<platform>.so while 3.11+ get _awscrt.abi3.so. Resolving it only in
+# the base environment would ship whichever the build host produced, so Cinema 4D 2024-2025
+# (Python 3.10) would fail to import awscrt and AWS Console sign-in would break there while
+# working on 2026.
+NATIVE_DEPENDENCIES = ["xxhash", "psutil", "awscrt"]
 
 PYSIDE6_VERSION = "6.8.3"
 PYSIDE6_PACKAGES = [f"PySide6-Essentials=={PYSIDE6_VERSION}", f"shiboken6=={PYSIDE6_VERSION}"]
@@ -152,10 +160,32 @@ def _get_package_version(package: str, install_path: Path) -> str:
     raise RuntimeError(f"Could not find version for package {package}")
 
 
+def _add_console_extra(requirement: str) -> str:
+    """Add deadline's `console` extra to a requirement string, preserving its specifier."""
+    match = re.fullmatch(
+        r"(?P<name>[A-Za-z0-9._-]+)(?:\[(?P<extras>[^\]]*)\])?(?P<spec>.*)", requirement
+    )
+    if not match or match.group("name").lower() != "deadline":
+        return requirement
+    extras = [extra for extra in (match.group("extras") or "").split(",") if extra]
+    if "console" not in extras:
+        extras.append("console")
+    return f"{match.group('name')}[{','.join(extras)}]{match.group('spec')}"
+
+
 def _build_base_environment(working_directory: Path, dependencies: list[Dependency]) -> Path:
     (working_directory / "base_env").mkdir()
     base_env_path = working_directory / "base_env"
-    dependencies_for_pip = [d.for_pip() for d in dependencies]
+    # The bundle is the submitter, which needs AWS Console sign-in. The console extra is
+    # requested here rather than declared in project.dependencies, because those are also
+    # resolved into the adaptor package, where a compiled awscrt wheel is both unusable and
+    # unavailable for one of the platform tags that build targets (see pyproject.toml).
+    #
+    # Requesting the extra rather than installing awscrt directly means the bundle tracks
+    # whatever the extra actually requires -- notably a botocore floor, since the console
+    # login provider lives in botocore, not in deadline -- and takes awscrt from the exact
+    # version botocore's crt extra pins, rather than resolving it independently and drifting.
+    dependencies_for_pip = [_add_console_extra(d.for_pip()) for d in dependencies]
     base_env_pip_args = [
         "pip",
         "install",
