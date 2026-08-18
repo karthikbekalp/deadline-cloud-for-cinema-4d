@@ -256,6 +256,60 @@ def _get_parameter_definition(
     return parameter
 
 
+def _get_adaptor_override_environment(wheels_path: Path) -> dict[str, Any]:
+    if not wheels_path.is_dir():
+        raise RuntimeError(
+            "The Developer Option 'Include Adaptor Wheels' is enabled, but the wheels "
+            f"directory does not exist:\n{wheels_path}"
+        )
+
+    wheels_path_package_names = {path.name.split("-", 1)[0] for path in wheels_path.glob("*.whl")}
+    expected_package_names = {
+        "openjd_adaptor_runtime",
+        "deadline",
+        "deadline_cloud_for_cinema_4d",
+    }
+    if wheels_path_package_names != expected_package_names:
+        raise RuntimeError(
+            "The Developer Option 'Include Adaptor Wheels' is enabled, but the wheels "
+            "directory contains the wrong wheels:\n"
+            f"Expected: {expected_package_names}\n"
+            f"Actual: {wheels_path_package_names}"
+        )
+
+    with open(Path(__file__).parent / "adaptor_override_environment.yaml") as file:
+        override_environment = yaml.safe_load(file)
+
+    override_adaptor_wheels_param = _get_parameter_definition(
+        override_environment["parameterDefinitions"],
+        "OverrideAdaptorWheels",
+    )
+    override_adaptor_wheels_param["default"] = str(wheels_path)
+    override_adaptor_name_param = _get_parameter_definition(
+        override_environment["parameterDefinitions"],
+        "OverrideAdaptorName",
+    )
+    override_adaptor_name_param["default"] = "cinema4d-openjd"
+
+    setup_script_path = Path(__file__).parent / "setup_adaptor_wheels.py"
+    setup_script = setup_script_path.read_text(encoding="utf8")
+    setup_file = next(
+        (
+            embedded_file
+            for embedded_file in override_environment["environment"]["script"]["embeddedFiles"]
+            if embedded_file["name"] == "SetupAdaptor"
+        ),
+        None,
+    )
+    if setup_file is None:
+        raise RuntimeError(
+            "Adaptor override environment is missing the 'SetupAdaptor' embedded file"
+        )
+    setup_file["data"] = setup_script
+
+    return override_environment
+
+
 def _get_job_template(
     settings: RenderSubmitterUISettings,
     renderers: set[str],
@@ -387,40 +441,9 @@ def _get_job_template(
 
     # If this developer option is enabled, merge the adaptor_override_environment
     if settings.include_adaptor_wheels:
-        with open(Path(__file__).parent / "adaptor_override_environment.yaml") as f:
-            override_environment = yaml.safe_load(f)
-
         # Read DEVELOPMENT.md for instructions to create the wheels directory.
         wheels_path = Path(__file__).parent.parent.parent.parent / "wheels"
-        if not wheels_path.exists() and wheels_path.is_dir():
-            raise RuntimeError(
-                "The Developer Option 'Include Adaptor Wheels' is enabled, but the wheels directory does not exist:\n"
-                + str(wheels_path)
-            )
-        wheels_path_package_names = {
-            path.split("-", 1)[0] for path in os.listdir(wheels_path) if path.endswith(".whl")
-        }
-        if wheels_path_package_names != {
-            "openjd_adaptor_runtime",
-            "deadline",
-            "deadline_cloud_for_cinema4d",
-        }:
-            raise RuntimeError(
-                "The Developer Option 'Include Adaptor Wheels' is enabled, but the wheels directory contains the wrong wheels:\n"
-                + "Expected: openjd_adaptor_runtime, deadline, and deadline_cloud_for_cinema4d\n"
-                + f"Actual: {wheels_path_package_names}"
-            )
-
-        override_adaptor_wheels_param = _get_parameter_definition(
-            override_environment["parameterDefinitions"],
-            "OverrideAdaptorWheels",
-        )
-        override_adaptor_wheels_param["default"] = str(wheels_path)
-        override_adaptor_name_param = _get_parameter_definition(
-            override_environment["parameterDefinitions"],
-            "OverrideAdaptorName",
-        )
-        override_adaptor_name_param["default"] = "cinema4d-openjd"
+        override_environment = _get_adaptor_override_environment(wheels_path)
 
         # There are no parameter conflicts between these two templates, so this works
         job_template["parameterDefinitions"].extend(override_environment["parameterDefinitions"])
