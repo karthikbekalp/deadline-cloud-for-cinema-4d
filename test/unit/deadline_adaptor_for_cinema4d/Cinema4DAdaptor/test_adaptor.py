@@ -6,6 +6,7 @@ from __future__ import annotations
 # the same Cinema4DAdaptor action queue, which can cause race conditions and
 # test failures when tests run in parallel across multiple workers.
 import json
+import logging
 from pathlib import Path
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -71,8 +72,6 @@ class TestCinema4DAdaptor_errors_on_cleanup:
         [
             # Critical stops should not fail the job.
             ("CRITICAL: Stop [ge_file.cpp(1172)]", False),
-            # Any string with substring "Error:" should fail the job
-            ("Redshift Error: Maxon licensing error: User not logged in (7)", True),
             # This error can be printed but the jobs are still successful.
             # Hence, this should not fail the job.
             ("CRITICAL: nullptr [text_object.cpp(1082)] [objectbase1.hxx(549)]", False),
@@ -84,12 +83,8 @@ class TestCinema4DAdaptor_errors_on_cleanup:
             ("Rendering failed", True),
             ("Asset missing", True),
             ("Asset Error", True),
-            ("Invalid License", True),
-            ("License Check error", True),
             ("Files cannot be written", True),
-            ("Enter Registration Data", True),
             ("Unable to write file", True),
-            ("[rlm] abort_on_license_fail enabled", True),
             ("RenderDocument failed with return code", True),
             ("Frame rendering aborted", True),
             ("Rendering was internally aborted", True),
@@ -363,6 +358,66 @@ class TestCinema4DAdaptor_on_start:
 
         # THEN
         assert mock_sleep.call_count == 3
+
+    @pytest.mark.parametrize(
+        "license_error",
+        [
+            "Redshift Error: Maxon licensing error: User not logged in (7)",
+            "Invalid License",
+            "License Check error",
+            "Enter Registration Data",
+            "[rlm] abort_on_license_fail enabled",
+            "17:44:34 No license found",
+            "18:38:54 No available licenses to choose",
+        ],
+    )
+    def test_license_failure_from_stdout_interrupts_startup(
+        self, init_data: dict, license_error: str
+    ) -> None:
+        """Tests that a licensing prompt fails startup without waiting for the timeout."""
+        # General error checking is optional, but a licensing prompt cannot recover
+        # without interactive input and must always stop the worker.
+        init_data["activate_error_checking"] = "0"
+        adaptor = Cinema4DAdaptor(init_data)
+        expected_error = (
+            "Cinema 4D failed to acquire a license.\n"
+            "If you are using bring your own license (BYOL), check your license configuration "
+            "and availability.\n"
+            "If you are using usage-based licensing (UBL) from AWS Deadline Cloud and need a "
+            "higher 'License sessions per license endpoint' limit, contact the AWS Deadline Cloud "
+            "team to request an increase.\n"
+            f"Error: {license_error}"
+        )
+
+        def emit_license_error(*args, **kwargs):
+            kwargs["stdout_handler"].emit(
+                logging.LogRecord(
+                    name="cinema4d",
+                    level=logging.ERROR,
+                    pathname="",
+                    lineno=0,
+                    msg=license_error,
+                    args=(),
+                    exc_info=None,
+                )
+            )
+            process = Mock()
+            process.is_running = True
+            return process
+
+        with (
+            patch.object(adaptor, "_initialize_maxon_assets_db_connection"),
+            patch.object(adaptor, "_start_cinema4d_server_thread"),
+            patch.object(adaptor, "_populate_action_queue"),
+            patch(
+                "deadline.cinema4d_adaptor.Cinema4DAdaptor.adaptor.LoggingSubprocess",
+                side_effect=emit_license_error,
+            ),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            adaptor.on_start()
+
+        assert str(exc_info.value) == expected_error
 
 
 @pytest.mark.xdist_group(name="adaptor_tests")

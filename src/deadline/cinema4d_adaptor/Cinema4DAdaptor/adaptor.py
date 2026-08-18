@@ -275,13 +275,8 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 re.compile(r".*Rendering failed.*", re.IGNORECASE),
                 re.compile(r".*Asset missing.*", re.IGNORECASE),
                 re.compile(r".*Asset Error.*", re.IGNORECASE),
-                re.compile(r".*Invalid License.*", re.IGNORECASE),
-                re.compile(r".*licensing error.*", re.IGNORECASE),
-                re.compile(r".*License Check error.*", re.IGNORECASE),
                 re.compile(r".*Files cannot be written.*", re.IGNORECASE),
-                re.compile(r".*Enter Registration Data.*", re.IGNORECASE),
                 re.compile(r".*Unable to write file.*", re.IGNORECASE),
-                re.compile(r".*\[rlm\] abort_on_license_fail enabled.*", re.IGNORECASE),
                 re.compile(r".*RenderDocument failed with return code.*", re.IGNORECASE),
                 re.compile(r".*Frame rendering aborted.*", re.IGNORECASE),
                 re.compile(r".*Rendering was internally aborted.*", re.IGNORECASE),
@@ -311,6 +306,24 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
                 RegexCallback(
                     [nvidia_driver_regexes],
                     self._handle_nvidia_driver_error,
+                )
+            )
+
+            # License failures cannot recover non-interactively and would otherwise
+            # consume worker time until the initialization timeout.
+            license_error_regexes = [
+                re.compile(r".*Invalid License.*", re.IGNORECASE),
+                re.compile(r".*licensing error.*", re.IGNORECASE),
+                re.compile(r".*License Check error.*", re.IGNORECASE),
+                re.compile(r".*Enter Registration Data.*", re.IGNORECASE),
+                re.compile(r".*\[rlm\] abort_on_license_fail enabled.*", re.IGNORECASE),
+                re.compile(r".*No license found.*", re.IGNORECASE),
+                re.compile(r".*No available licenses to choose.*", re.IGNORECASE),
+            ]
+            callback_list.append(
+                RegexCallback(
+                    license_error_regexes,
+                    self._handle_license_error,
                 )
             )
 
@@ -400,6 +413,19 @@ class Cinema4DAdaptor(Adaptor[AdaptorConfiguration]):
         message = (
             f"{detail} "
             "Please update the NVIDIA drivers on your worker fleet. "
+            f"Error: {match.group(0)}"
+        )
+        self._exc_info = RuntimeError(message)
+
+    def _handle_license_error(self, match: re.Match) -> None:
+        """Handle a fatal Cinema 4D licensing failure."""
+        message = (
+            "Cinema 4D failed to acquire a license.\n"
+            "If you are using bring your own license (BYOL), check your license configuration "
+            "and availability.\n"
+            "If you are using usage-based licensing (UBL) from AWS Deadline Cloud and need a "
+            "higher 'License sessions per license endpoint' limit, contact the AWS Deadline Cloud "
+            "team to request an increase.\n"
             f"Error: {match.group(0)}"
         )
         self._exc_info = RuntimeError(message)
