@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from importlib.metadata import distributions
 from pathlib import Path
 
@@ -66,10 +68,37 @@ def _get_site_packages(venv_python: Path) -> Path:
 def _get_distribution_version(site_packages: Path, distribution_name: str) -> str:
     canonical_name = re.sub(r"[-_.]+", "-", distribution_name).lower()
     for distribution in distributions(path=[str(site_packages)]):
-        installed_name = distribution.metadata.get("Name")
+        installed_name = distribution.metadata["Name"]
         if installed_name and re.sub(r"[-_.]+", "-", installed_name).lower() == canonical_name:
             return distribution.version
     raise RuntimeError(f"Could not find '{distribution_name}' in {site_packages}")
+
+
+def _install_wheels(venv_python: Path, wheels: list[Path]) -> None:
+    # The active Conda environment supplies transitive dependencies. Development
+    # wheels use generated versions that may not satisfy each other's release ranges.
+    subprocess.run(
+        [
+            str(venv_python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--force-reinstall",
+            "--no-deps",
+            *[str(wheel) for wheel in wheels],
+        ],
+        check=True,
+    )
+
+
+def _prioritize_site_packages(site_packages: Path) -> None:
+    # Queue dependencies may be exposed through PYTHONPATH. Keep that environment
+    # unchanged for Cinema 4D, but make the attached wheels win module resolution.
+    (site_packages / "_deadline_adaptor_override.pth").write_text(
+        f"import sys; sys.path.insert(0, {str(site_packages)!r})\n",
+        encoding="utf8",
+    )
 
 
 def _emit_environment_changes(
@@ -77,13 +106,9 @@ def _emit_environment_changes(
     *,
     venv_dir: Path,
     venv_bin: Path,
-    site_packages: Path,
 ) -> None:
     after = dict(before)
     after["PATH"] = os.pathsep.join(filter(None, (str(venv_bin), before.get("PATH", ""))))
-    after["PYTHONPATH"] = os.pathsep.join(
-        filter(None, (str(site_packages), before.get("PYTHONPATH", "")))
-    )
     after["VIRTUAL_ENV"] = str(venv_dir)
     after.pop("PYTHONHOME", None)
 
@@ -96,10 +121,17 @@ def _emit_environment_changes(
             print(f"openjd_unset_env: {key}")
 
 
-def main() -> None:
-    working_dir = Path(r"{{Session.WorkingDirectory}}")
-    wheels_dir = Path(r"{{Param.OverrideAdaptorWheels}}")
-    adaptor_name = r"{{Param.OverrideAdaptorName}}"
+def _parse_args(argv: Sequence[str] | None = None) -> tuple[Path, Path, str]:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("working_directory")
+    parser.add_argument("wheels_directory")
+    parser.add_argument("adaptor_name")
+    args = parser.parse_args(argv)
+    return Path(args.working_directory), Path(args.wheels_directory), args.adaptor_name
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    working_dir, wheels_dir, adaptor_name = _parse_args(argv)
     before_environment = dict(os.environ)
 
     print(f"Setting up {adaptor_name} from attached wheels on {sys.platform}")
@@ -115,18 +147,7 @@ def main() -> None:
     )
 
     venv_bin, venv_python, adaptor_executable = _get_venv_paths(venv_dir, adaptor_name)
-    subprocess.run(
-        [
-            str(venv_python),
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "--no-deps",
-            *[str(wheel) for wheel in wheels],
-        ],
-        check=True,
-    )
+    _install_wheels(venv_python, wheels)
 
     if not adaptor_executable.is_file():
         raise RuntimeError(
@@ -134,6 +155,7 @@ def main() -> None:
         )
 
     site_packages = _get_site_packages(venv_python)
+    _prioritize_site_packages(site_packages)
     adaptor_version = _get_distribution_version(site_packages, "deadline-cloud-for-cinema-4d")
     print(
         "ADAPTOR_OVERRIDE_READY "
@@ -145,7 +167,6 @@ def main() -> None:
         before_environment,
         venv_dir=venv_dir,
         venv_bin=venv_bin,
-        site_packages=site_packages,
     )
 
 

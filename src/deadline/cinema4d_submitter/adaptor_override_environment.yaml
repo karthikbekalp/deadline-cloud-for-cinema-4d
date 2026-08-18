@@ -16,9 +16,13 @@ environment:
   script:
     actions:
       onEnter:
+        # The Cinema 4D Conda environment provides "python" on Windows and Linux.
         command: python
         args:
         - '{{Env.File.SetupAdaptor}}'
+        - '{{Session.WorkingDirectory}}'
+        - '{{Param.OverrideAdaptorWheels}}'
+        - '{{Param.OverrideAdaptorName}}'
         cancelation:
           mode: NOTIFY_THEN_TERMINATE
     embeddedFiles:
