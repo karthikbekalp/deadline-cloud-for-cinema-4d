@@ -42,6 +42,7 @@ from .detailed_logging_utils import get_detailed_logging_environment
 from .font_utils import FONTS_DIR, get_font_manager_environment, scene_has_fonts
 from .platform_utils import is_macos, is_windows
 from .scene import Animation, Scene, get_renderer_warning
+from .setup_adaptor_wheels import _find_wheels
 from .style import C4D_STYLE
 from .takes import TakeSelection
 from .template_timeout_patcher import add_timeouts_to_job_template
@@ -263,19 +264,13 @@ def _get_adaptor_override_environment(wheels_path: Path) -> dict[str, Any]:
             f"directory does not exist:\n{wheels_path}"
         )
 
-    wheels_path_package_names = {path.name.split("-", 1)[0] for path in wheels_path.glob("*.whl")}
-    expected_package_names = {
-        "openjd_adaptor_runtime",
-        "deadline",
-        "deadline_cloud_for_cinema_4d",
-    }
-    if wheels_path_package_names != expected_package_names:
+    try:
+        _find_wheels(wheels_path)
+    except RuntimeError as exc:
         raise RuntimeError(
             "The Developer Option 'Include Adaptor Wheels' is enabled, but the wheels "
-            "directory contains the wrong wheels:\n"
-            f"Expected: {expected_package_names}\n"
-            f"Actual: {wheels_path_package_names}"
-        )
+            f"directory contains the wrong wheels:\n{exc}"
+        ) from exc
 
     with open(Path(__file__).parent / "adaptor_override_environment.yaml") as file:
         override_environment = yaml.safe_load(file)

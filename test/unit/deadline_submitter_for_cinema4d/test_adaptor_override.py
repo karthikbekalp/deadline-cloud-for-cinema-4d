@@ -66,6 +66,15 @@ def test_get_adaptor_override_environment_rejects_missing_directory(tmp_path):
         _get_adaptor_override_environment(wheels_dir)
 
 
+def test_get_adaptor_override_environment_rejects_duplicate_package_wheels(tmp_path):
+    wheels_dir = tmp_path / "wheels"
+    _create_wheels(wheels_dir)
+    (wheels_dir / "deadline_cloud_for_cinema_4d-0.12.2-py3-none-any.whl").touch()
+
+    with pytest.raises(RuntimeError, match="Expected exactly one wheel"):
+        _get_adaptor_override_environment(wheels_dir)
+
+
 def test_find_wheels_requires_exact_expected_set(tmp_path):
     wheels_dir = tmp_path / "wheels"
     _create_wheels(wheels_dir)
