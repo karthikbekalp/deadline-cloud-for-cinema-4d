@@ -696,6 +696,10 @@ _XFAIL_REDSHIFT_TEXTURED_IN_CI = pytest.mark.xfail(
     reason="Redshift textured rendering can fail with Cinema 4D 2024, 2025, and 2026",
     strict=False,
 )
+_SKIP_OCIO_2024 = pytest.mark.skipif(
+    os.environ.get("C4D_VERSION", "2026") == "2024",
+    reason="BakeOcioViewToBitmap requires Cinema 4D 2025.2 or newer",
+)
 
 # Standard test cases. Each entry is a folder name under test_cases/ with an
 # input/scene.py (required) and an optional input/configure.py (loaded as the
@@ -711,6 +715,8 @@ _CASES = [
     "job_specific_save_project_with_assets",
     "job_specific_task_chunking",
     "job_specific_tile_rendering",
+    pytest.param("ocio_render_consistency", marks=_SKIP_OCIO_2024),
+    pytest.param("ocio_untoned", marks=_SKIP_OCIO_2024),
     "physical",
     "physical_nonascii",
     "physical_textured",

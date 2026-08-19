@@ -1,8 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-"""Build the shared Redshift OCIO studio scene for the tile-rendering test.
-
-Usage: c4dpy scene.py <scene_dir>
-"""
+"""Build the shared Redshift OCIO studio with the Un-tone-mapped ACES view."""
 
 import os
 import sys
@@ -10,7 +7,7 @@ import sys
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../.."))
 sys.path.insert(0, REPO_ROOT)
 
-from test.integ.ocio_scene import ACES_DEFAULT_VIEW_TRANSFORM, build_ocio_scene
+from test.integ.ocio_scene import ACES_UNTONE_MAPPED_VIEW_TRANSFORM, build_ocio_scene
 
 
 def main() -> int:
@@ -20,8 +17,8 @@ def main() -> int:
 
     build_ocio_scene(
         sys.argv[1],
-        "job_specific_tile_rendering.c4d",
-        ACES_DEFAULT_VIEW_TRANSFORM,
+        "ocio_untoned.c4d",
+        ACES_UNTONE_MAPPED_VIEW_TRANSFORM,
     )
     return 0
 

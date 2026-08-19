@@ -1,8 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-"""Build the shared Redshift OCIO studio scene for the tile-rendering test.
-
-Usage: c4dpy scene.py <scene_dir>
-"""
+"""Build the shared Redshift OCIO studio scene."""
 
 import os
 import sys
@@ -20,7 +17,7 @@ def main() -> int:
 
     build_ocio_scene(
         sys.argv[1],
-        "job_specific_tile_rendering.c4d",
+        "ocio_render_consistency.c4d",
         ACES_DEFAULT_VIEW_TRANSFORM,
     )
     return 0
