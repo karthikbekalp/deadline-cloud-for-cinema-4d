@@ -228,13 +228,16 @@ def finalize_tile_render(
         render_data: The render data object (to restore output paths).
         frame: The current frame number.
     """
-    # Restore the OCIO bake flag to its original value
-    if ctx.orig_bake_flag is not None:
-        rd[c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER] = ctx.orig_bake_flag
-
-    if ctx.requires_baking:
-        baked = c4d.documents.BakeOcioViewToBitmap(bm, rd, c4d.SAVEBIT_NONE)
-        bm = baked or bm
+    try:
+        if ctx.requires_baking:
+            # setup_tile_render disabled the render-time bake. It must remain
+            # disabled here or BakeOcioViewToBitmap assumes the bitmap was
+            # already baked and returns None.
+            baked = c4d.documents.BakeOcioViewToBitmap(bm, rd, c4d.SAVEBIT_NONE)
+            bm = baked or bm
+    finally:
+        if ctx.orig_bake_flag is not None:
+            rd[c4d.RDATA_BAKE_OCIO_VIEW_TRANSFORM_RENDER] = ctx.orig_bake_flag
 
     if c4d.GetC4DVersion() >= C4D_VERSION_2025_2:
         bm.SetColorProfile(c4d.bitmaps.ColorProfile(), c4d.COLORPROFILE_INDEX_DISPLAYSPACE)
