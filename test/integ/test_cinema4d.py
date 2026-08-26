@@ -18,6 +18,7 @@ from deadline_test_fixtures.job_bundle import (
 )
 from deadline_test_fixtures.xa11y import (
     SharedSubmitterDialog,
+    dismiss_bundle_saved_popup,
     find_accessibility_app,
 )
 from yaml import safe_dump, safe_load
@@ -45,16 +46,15 @@ _AUTO_OPEN_PLUGIN_DIR = Path(__file__).parent / "fixtures" / "auto_open_submitte
 # Selector strings pinned by inspecting the live UIA tree at runtime
 # (see commit history for tree dumps). UIA on Windows surfaces the Qt
 # QApplication display name as the dialog's accessible name — *not*
-# Qt's windowTitle. The Submit/Export-bundle buttons keep their visible
+# Qt's windowTitle. The Submit/Save-bundle-as buttons keep their visible
 # labels as accessible names.
 #
-# Export button: deadline-cloud/src/deadline/client/ui/dialogs/
+# Save button: deadline-cloud/src/deadline/client/ui/dialogs/
 #                    submit_job_to_deadline_dialog.py:250
 # Both the UIA App hosting the dialog and the dialog window itself surface this
 # same name (the QApplication display name + version), so it serves as the
 # prefix for matching either one.
 _DIALOG_NAME_PREFIX = "Deadline Cloud Cinema4D Submitter"
-_EXPORT_BUTTON_NAME = "Export bundle"
 
 _C4D_BOOT_TIMEOUT_S = 180.0
 _DIALOG_VISIBLE_TIMEOUT_S = 60.0
@@ -67,7 +67,7 @@ _SCENE_RELATIVE_PATHS = {
 }
 
 # A per-scene hook to drive the submitter dialog (switch tabs, set parameters,
-# toggle options) after it has loaded but before Export bundle is pressed. It
+# toggle options) after it has loaded but before Save bundle as is pressed. It
 # receives the dialog locator; use dialog.descendant("role[name='...']") to
 # reach widgets and .set_value()/.press()/.toggle()/.select() to interact. A
 # scene with no configurator exports with the dialog's default settings.
@@ -348,11 +348,11 @@ def _wait_for_submitter_dialog(dialog_app):
 
 def _wait_for_queue_environment_loading(dialog_app) -> None:
     """Wait for the queue-environment loading caption to clear. Non-fatal if it
-    times out — Export bundle may still be clickable.
+    times out — Save bundle as may still be clickable.
 
     The mock returns no queue environments, so the caption ("Loading Queue
     Environments...") should appear briefly and clear almost immediately; we
-    still wait for it to confirm the dialog has settled before pressing Export.
+    still wait for it to confirm the dialog has settled before saving.
     """
     log("waiting for queue environment loading to finish")
     loading = dialog_app.locator(
@@ -367,18 +367,15 @@ def _wait_for_queue_environment_loading(dialog_app) -> None:
         log(f"loading-text wait failed (non-fatal): {e!r}")
 
 
-def _press_export_bundle(dialog, dialog_app) -> None:
-    """Wait for the Export bundle button to be visible and enabled, then
-    press it."""
-    log(f"waiting for button: {_EXPORT_BUTTON_NAME!r}")
-    export_btn = SharedSubmitterDialog(dialog).button(_EXPORT_BUTTON_NAME)
-    export_btn.wait_visible(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
-    export_btn.wait_enabled(timeout=_DIALOG_VISIBLE_TIMEOUT_S)
-    log("pressing Export bundle")
+def _save_bundle_locally(dialog, dialog_app) -> None:
+    """Open Save bundle as, choose Local, and confirm the modal save."""
+    log("saving bundle locally through Save bundle as")
     try:
-        export_btn.press()
+        SharedSubmitterDialog(dialog, app_root=dialog_app).save_bundle_locally(
+            timeout=_DIALOG_VISIBLE_TIMEOUT_S
+        )
     except Exception:
-        log("Export bundle press failed; final dialog tree:")
+        log("Save bundle as flow failed; final dialog tree:")
         try:
             print(dialog_app.dump())
         except Exception as e:  # noqa: BLE001 - preserve the original export error
@@ -386,50 +383,6 @@ def _press_export_bundle(dialog, dialog_app) -> None:
             # original error below.
             log(f"Final dialog tree dump failed: {e!r}")
         raise
-
-
-def _dismiss_success_popup(pid: int) -> None:
-    """Dismiss the "Saved the submission as a job bundle" popup promptly.
-
-    The popup is deadline-cloud's success QMessageBox. Two things make it
-    awkward to match (both confirmed by dumping the live AX tree):
-
-    * It is hosted by the **Cinema 4D** app, NOT the separate submitter-dialog
-      app, so searching ``dialog_app`` never finds it.
-    * Its title ("Cinema4D job submission") is not exposed as the dialog's AX
-      name on macOS -- the role is ``dialog`` with an empty name. The reliable
-      anchor is the message body static_text, which starts with "Saved the
-      submission as a job bundle".
-
-    So we poll the accessibility roots belonging to the launched Cinema 4D
-    process for a dialog/window/sheet containing that body text and press its
-    OK button. Restricting by PID avoids querying unrelated applications whose
-    accessibility providers may be unresponsive. Best-effort and non-fatal:
-    the bundle is already on disk and asserted separately.
-    """
-    log("dismissing success popup ('Saved the submission as a job bundle')")
-    deadline_t = time.monotonic() + 5.0
-    while time.monotonic() < deadline_t:
-        try:
-            for app in xa11y.App.list():
-                if app.pid != pid:
-                    continue
-                ok = app.locator(
-                    "dialog button[name='OK'], "
-                    "window button[name='OK'], "
-                    "sheet button[name='OK']"
-                )
-                # Only treat it as our popup if the success body text is present
-                # in the same app, so we don't press an unrelated OK button.
-                body = app.locator("static_text[name^='Saved the submission as a job bundle']")
-                if body.exists() and ok.exists():
-                    ok.press()
-                    log("success popup dismissed (OK)")
-                    return
-        except Exception as e:  # noqa: BLE001 - polling retries transient accessibility errors
-            log(f"success-popup scan raised (retrying): {e!r}")
-        time.sleep(0.25)
-    log("success popup not found within 5s (non-fatal, bundle already exported)")
 
 
 def _dump_settings_tabs(dialog) -> None:
@@ -472,39 +425,40 @@ def _drive_submitter_ui(
     Waits for the dialog, lets queue-environment loading settle (the mock
     returns no queue environments, so there are no Conda parameter widgets to
     rebuild and thus no reload race), runs the optional per-scene `configure`
-    hook to adjust the dialog (tabs, parameters), presses Export bundle,
+    hook to adjust the dialog (tabs, parameters), saves the bundle locally,
     dismisses the success popup, then reads the completed bundle from
     `history_dir`.
 
-    `configure` runs after the dialog settles and before Export. When it is None
-    the dialog is exported with its default settings.
+    `configure` runs after the dialog settles and before the save flow. When it
+    is None the dialog is exported with its default settings.
     """
     dialog_app = _resolve_dialog_app(proc)
     dialog = _wait_for_submitter_dialog(dialog_app)
     _wait_for_queue_environment_loading(dialog_app)
     # Diagnostic harvest: DIALOG_DUMP=1 dumps each settings tab's tree and raises,
     # so you can capture the live accessibility names (which differ across macOS
-    # AX and Windows UIA) without hand-editing a configurator. Skips Export.
+    # AX and Windows UIA) without hand-editing a configurator. Skips saving.
     if os.environ.get("DIALOG_DUMP") == "1":
         _dump_settings_tabs(dialog)
-        raise AssertionError("DIALOG_DUMP=1: dumped settings tabs, skipping export")
+        raise AssertionError("DIALOG_DUMP=1: dumped settings tabs, skipping save")
     if configure is not None:
         log("running per-scene dialog configurator")
         configure(dialog)
-    _press_export_bundle(dialog, dialog_app)
+    _save_bundle_locally(dialog, dialog_app)
 
-    # The submitter writes the bundle files and only then shows the success
-    # popup (on_export_bundle in submit_job_to_deadline_dialog.py), so once the
-    # popup is up the bundle is complete on disk and we can read it directly.
-    _dismiss_success_popup(proc.pid)
+    # The submitter writes the bundle files before showing the success popup,
+    # so once the popup is up the bundle is complete on disk.
+    log("dismissing success popup ('Bundle saved to:')")
+    if dismiss_bundle_saved_popup(proc.pid):
+        log("success popup dismissed (OK)")
+    else:
+        log("success popup not found within 5s (non-fatal, bundle already exported)")
     # Note: on Windows the submitter would normally open the bundle folder in
     # File Explorer (os.startfile); the sidecar plugin suppresses that in mock
     # mode, so there's no Explorer window to clean up here.
 
     staged_bundle = find_complete_job_bundle(history_dir)
-    assert (
-        staged_bundle is not None
-    ), f"success popup shown but no complete bundle found under {history_dir}"
+    assert staged_bundle is not None, f"no complete bundle found under {history_dir}"
     log(f"bundle found: {staged_bundle}")
     return staged_bundle
 
@@ -524,11 +478,10 @@ def _export_job_bundle_via_submitter(
     ``_build_launch_env``); the pre-GUI hook case uses it to set
     ``DEADLINE_HOOKS_DIR``.
 
-    The submitter exports via create_job_history_bundle_dir, which always
-    writes under <history_dir>/<YYYY-mm>/<bundle-name>/. The history dir is set
-    in the temp deadline config the `deadline_farm` fixture wrote (read inside
-    the C4D subprocess), so the bundle lands under that dir; we then copy its
-    files flat into `job_bundle_generated` for validation.
+    The temp Deadline config uses ``job_history_dir`` as the default local
+    bundle directory. The test selects Local in the Save bundle as dialog, so
+    the bundle lands under that directory; we then copy its files flat into
+    `job_bundle_generated` for validation.
 
     Owns all cleanup: the C4D subprocess is always killed and its diagnostic
     log echoed before the staging dir is removed, even on failure.
