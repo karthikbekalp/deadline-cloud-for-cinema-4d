@@ -131,12 +131,14 @@ def deadline_farm(tmp_path):
     config_path = tmp_path / "deadline.config"
     home_dir = tmp_path / "home"
     job_history_dir = tmp_path / "job_history"
+    job_history_dir.mkdir()
 
     write_deadline_config(
         config_path,
         farm_id=backend.farm_id,
         queue_id=backend.queue_id,
         job_history_dir=job_history_dir,
+        job_bundle_default_directory=job_history_dir,
     )
     env_overlay = build_mock_environment(
         dict(os.environ),

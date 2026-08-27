@@ -43,7 +43,7 @@ When adding new features or fixing bugs, always add unit tests.
 Drives the **real Deadline Cloud submitter dialog** with
 [xa11y](https://xa11y.dev). It launches the real Cinema 4D GUI with
 the real, unmodified plugin, opens the submitter as a user does, drives it via
-the OS accessibility tree, clicks **Export bundle**, and runs the same bundle/
+the OS accessibility tree, clicks **Save bundle as**, and runs the same bundle/
 render assertions as the previous suite.
 
 This file is the single source of truth for the suite — there is no separate
@@ -79,7 +79,7 @@ pytest (parent process)
                 │ xa11y drives it via the OS accessibility tree
                 │   - wait for dialog, wait for queue-env loading
                 │   - run the case's configure(dialog) (optional)
-                │   - press "Export bundle"
+                │   - press "Save bundle as"
                 ▼
          bundle written to <job_history_dir>/<YYYY-mm>/<bundle-name>/
                 │
@@ -115,7 +115,7 @@ test_cases/<name>/
 ├── input/                 # what you author
 │   ├── scene.py           #   required — builds <name>.c4d (runs in c4dpy)
 │   └── configure.py       #   OPTIONAL — configure(dialog) drives the dialog
-│                          #              before Export (runs in pytest + xa11y)
+│                          #              before clicking "Save bundle as" (pytest + xa11y)
 ├── expected/              # what we compare against
 │   ├── job_bundle/        #   golden template/parameter_values/asset_references
 │   └── renders/           #   version-specific golden PNGs (Windows-only compare)
@@ -192,7 +192,7 @@ A `configure.py` drives widgets by their accessibility **role + name** (e.g.
 guess these names — and they differ between macOS (AX) and Windows (UIA), so a
 configurator must be verified on both. Harvest the live names with the built-in
 dump mode, which prints both settings tabs' accessibility trees and then stops
-(no Export):
+(without saving a bundle):
 
 ```bash
 # macOS
@@ -267,7 +267,8 @@ production.
     the bundle folder on Windows (it would linger/pile up across runs).
 - **Empty queue environments**: the mock returns an empty `ListQueueEnvironments`,
   so there are no Conda parameter widgets for `OpenJDParametersWidget.rebuild_ui`
-  to recreate mid-Export and thus no reload race. Consequence: the exported
+  to recreate while the bundle is being saved and thus no reload race.
+  Consequence: the exported
   bundle carries no `CondaPackages` / `CondaChannels`, and the expected bundles
   omit them too.
 
@@ -334,7 +335,7 @@ exactly the three files (`template.yaml`, `parameter_values.yaml`,
    generated files in `actual/`.
 4. Capture the golden bundle, then rerun the focused case.
 
-**Configured case (drive the dialog before Export):** same, plus an
+**Configured case (drive the dialog before clicking Save bundle as):** same, plus an
 `input/configure.py` with a top-level `configure(dialog)` using the
 `submitter_ui` page-object:
 
@@ -346,7 +347,7 @@ def configure(dialog):
     ui.set_detailed_logging(dialog, True)
 ```
 
-It runs after the dialog settles and before Export. Reuse helpers from
+It runs after the dialog settles and before clicking **Save bundle as**. Reuse helpers from
 `submitter_ui.py`; add a C4D-specific helper there, plus a focused unit test in
 `test_submitter_ui.py`, when no helper exists. Do not guess accessibility
 selectors. Use `DIALOG_DUMP=1`, then verify new selectors on Windows and macOS.
@@ -385,7 +386,7 @@ hook would silently not run. The test enables `settings.allow_environment_hooks`
 (so the submitter sources `DEADLINE_HOOKS_DIR`) and `settings.auto_accept` (so
 hooks run without the Qt confirmation prompt) in the config the `deadline_farm`
 fixture wrote, points `DEADLINE_HOOKS_DIR` at that generated dir via the launch
-env, Exports, then asserts a marker file proves the hook actually ran before
+env, clicks **Save bundle as**, then asserts a marker file proves the hook actually ran before
 asserting the emitted `name`/`description` reached `template.yaml` and
 `deadline:priority` reached `parameter_values.yaml` (the marker separates "hook
 never launched" from "hook ran but output wasn't wired in"). To change what the
