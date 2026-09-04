@@ -174,6 +174,10 @@ def _take_selection(element: xa11y.Element) -> str:
     return ""
 
 
+def _take_selection_matches(element: xa11y.Element | None, *, selection: str) -> bool:
+    return element is not None and _take_selection(element) == selection
+
+
 def _take_combo_index(elements: list[xa11y.Element]) -> int:
     """Return the one-based index of the visible Takes combo box."""
     visible = [
@@ -222,18 +226,43 @@ def _activate_take_option(option: xa11y.Locator, selection: str) -> None:
     xa11y.input_sim().click(option_element)
 
 
+def _select_take_with_keyboard(
+    combo: xa11y.Locator,
+    current: str,
+    selection: str,
+) -> None:
+    """Select a Qt combo item without relying on macOS pointer coordinates."""
+    current_index = _TAKE_OPTIONS.index(current)
+    selection_index = _TAKE_OPTIONS.index(selection)
+    step = 1 if selection_index > current_index else -1
+    key = "ArrowDown" if step > 0 else "ArrowUp"
+
+    combo.focus()
+    combo.wait_focused(timeout=5.0)
+    input_sim = xa11y.input_sim()
+    for index in range(current_index + step, selection_index + step, step):
+        input_sim.press(key)
+        combo.wait_until(
+            partial(_take_selection_matches, selection=_TAKE_OPTIONS[index]),
+            timeout=5.0,
+        )
+
+
 def _wait_for_take_selection(combo: xa11y.Locator, selection: str) -> None:
     """Confirm a highlighted Qt combo row when activation did not commit it."""
 
-    def is_selected(element):
-        return element is not None and _take_selection(element) == selection
-
     try:
-        combo.wait_until(is_selected, timeout=1.0)
+        combo.wait_until(
+            partial(_take_selection_matches, selection=selection),
+            timeout=1.0,
+        )
         return
     except xa11y.TimeoutError:
         xa11y.input_sim().press("Enter")
-    combo.wait_until(is_selected, timeout=10.0)
+    combo.wait_until(
+        partial(_take_selection_matches, selection=selection),
+        timeout=10.0,
+    )
 
 
 def _job_specific_text_field(dialog: xa11y.Locator, nth: int) -> xa11y.Locator:
@@ -341,6 +370,14 @@ def select_takes(dialog: xa11y.Locator, selection: str) -> None:
     if not current:
         raise AssertionError(f"Unexpected current take selection {current!r}")
     if current == selection:
+        return
+
+    # Older Qt builds in Cinema 4D 2024 can expose popup rows through AX while
+    # intermittently dropping xa11y's synthetic pointer click on macOS. Combo
+    # keyboard navigation avoids popup coordinates and commits each index
+    # change directly.
+    if sys.platform == "darwin":
+        _select_take_with_keyboard(combo, current, selection)
         return
 
     combo_actions = set(combo.element().actions)
